@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Plinkified EQL Command Center</title>
+<style>
+:root{--bg:#0f1217;--panel:#191e26;--panel2:#222a36;--text:#f5f1e7;--muted:#aeb8c5;--gold:#d8a33f;--green:#7fc8a9;--red:#df6b6b;--blue:#76a9e8;--border:#35404e}
+*{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui,Arial,sans-serif;background:linear-gradient(180deg,#0a0d11,#121720);color:var(--text)}
+.wrap{max-width:1250px;margin:auto;padding:22px}.header{display:flex;justify-content:space-between;align-items:center;gap:14px;margin-bottom:18px}
+h1{margin:0;font-size:clamp(26px,4vw,42px)}.tag{color:var(--gold)}.sub{color:var(--muted);margin-top:5px}
+.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:15px}.card{background:rgba(25,30,38,.98);border:1px solid var(--border);border-radius:14px;padding:16px;box-shadow:0 10px 28px rgba(0,0,0,.24)}
+.s4{grid-column:span 4}.s5{grid-column:span 5}.s6{grid-column:span 6}.s7{grid-column:span 7}.s8{grid-column:span 8}.s12{grid-column:span 12}
+@media(max-width:900px){.s4,.s5,.s6,.s7,.s8,.s12{grid-column:span 12}}
+h2{font-size:18px;margin:0 0 12px}label{display:block;color:var(--muted);font-size:13px;margin:8px 0 5px}
+input,select,textarea{width:100%;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:9px;padding:10px;font:inherit}
+textarea{min-height:90px;resize:vertical}.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.row3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+@media(max-width:620px){.row,.row3{grid-template-columns:1fr}}
+button{background:var(--gold);color:#17130b;border:none;border-radius:9px;padding:10px 14px;font-weight:800;cursor:pointer}
+button.secondary{background:#334055;color:var(--text)}button.danger{background:var(--red);color:white}button.green{background:var(--green);color:#102019}
+.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}.pill{display:inline-block;background:#2d3542;color:var(--muted);padding:5px 9px;border-radius:999px;font-size:12px;margin:2px 4px 2px 0}
+.big{font-size:42px;font-weight:900;color:var(--green);font-variant-numeric:tabular-nums}.muted{color:var(--muted)}
+.statgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.stat{background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:12px}
+.stat b{font-size:24px;display:block;color:var(--gold)}@media(max-width:700px){.statgrid{grid-template-columns:repeat(2,1fr)}}
+.drop{border:2px dashed #4b586b;border-radius:12px;padding:20px;text-align:center;color:var(--muted);cursor:pointer}.drop.drag{border-color:var(--gold);color:var(--gold)}
+table{width:100%;border-collapse:collapse}th,td{padding:8px 7px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}th{color:var(--muted);font-size:12px;text-transform:uppercase}
+.scroll{max-height:360px;overflow:auto}.event-kill{color:#ffd68a}.event-loot{color:#87e0b6}.event-death{color:#ff9090}.event-zone{color:#8fbcff}.event-tell{color:#d7a7ff}
+small{color:var(--muted)}footer{text-align:center;color:var(--muted);font-size:12px;padding:24px 0 5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <div>
+      <h1><span class="tag">Plinkified</span> EQL Command Center</h1>
+      <div class="sub">Trio planning, camp timing, and log-file archaeology for Whittler Stankybud.</div>
+    </div>
+    <span class="pill">Saves in your browser</span>
+  </div>
+
+  <div class="grid">
+    <section class="card s4">
+      <h2>Current Trio</h2>
+      <div class="row3">
+        <div><label>Class 1</label><input id="c1" value="Rogue"></div>
+        <div><label>Class 2</label><input id="c2" value="Druid"></div>
+        <div><label>Class 3</label><input id="c3" value="Shadow Knight"></div>
+      </div>
+      <div class="row">
+        <div><label>Current Level</label><input id="level" type="number" value="10" min="1"></div>
+        <div><label>Target Level</label><input id="target" type="number" value="35" min="1"></div>
+      </div>
+      <label>Zone / Camp</label><input id="zone" value="Befallen">
+      <label>Run Notes</label><textarea id="notes">Take this trio to at least 35, grab useful Guk gear, then evaluate the next drop.</textarea>
+      <div class="actions"><button onclick="savePlanner()">Save</button><button class="secondary" onclick="loadPlanner()">Reload</button></div>
+    </section>
+
+    <section class="card s4">
+      <h2>Camp Timer</h2>
+      <label>Named / Spawn</label><input id="spawnName" placeholder="e.g. Frenzied Ghoul">
+      <div class="row">
+        <div><label>Respawn Minutes</label><input id="respawnMin" type="number" value="22" min="1"></div>
+        <div><label>Respawn Seconds</label><input id="respawnSec" type="number" value="0" min="0" max="59"></div>
+      </div>
+      <div class="big" id="timerDisplay">22:00</div>
+      <div class="muted" id="timerStatus">Ready to start</div>
+      <div class="actions">
+        <button class="green" onclick="startTimer()">Start / Reset</button>
+        <button class="secondary" onclick="pauseTimer()">Pause</button>
+        <button class="secondary" onclick="resumeTimer()">Resume</button>
+        <button class="danger" onclick="clearTimer()">Clear</button>
+      </div>
+      <label>Recent Camp Timers</label>
+      <div id="timerHistory" class="scroll"></div>
+    </section>
+
+    <section class="card s4">
+      <h2>Quick Run Stats</h2>
+      <div class="statgrid">
+        <div class="stat"><b id="killCount">0</b><span>Kills</span></div>
+        <div class="stat"><b id="lootCount">0</b><span>Loot</span></div>
+        <div class="stat"><b id="deathCount">0</b><span>Deaths</span></div>
+        <div class="stat"><b id="tellCount">0</b><span>Tells</span></div>
+      </div>
+      <label>Session Start</label><div id="sessionStart" class="muted">No log loaded</div>
+      <label>Session End</label><div id="sessionEnd" class="muted">No log loaded</div>
+      <label>Estimated Duration</label><div id="sessionDuration" class="muted">—</div>
+    </section>
+
+    <section class="card s5">
+      <h2>EQL Log Parser</h2>
+      <div id="drop" class="drop">
+        Drop an EQL/EQ log file here<br><small>or click to choose a .txt / .log file</small>
+        <input id="fileInput" type="file" accept=".txt,.log" hidden>
+      </div>
+      <div class="actions">
+        <button class="green" id="liveFileBtn">Choose & Monitor Live</button>
+        <button class="secondary" id="stopMonitorBtn">Stop Monitoring</button>
+        <button class="secondary" onclick="exportParsed()">Export Parsed CSV</button>
+        <button class="danger" onclick="clearParsed()">Clear Parsed Data</button>
+      </div>
+      <div class="pill" id="monitorBadge">● Not monitoring</div>
+      <div class="muted" id="monitorDetail"><small>Live mode works best in Chrome or Edge. Keep this page open while EQL writes to the log.</small></div>
+      <p class="muted"><small>Parser recognizes common EQ-style timestamps, kills, looting, deaths, tells, and zone-entry lines. Unknown lines remain untouched in your original file.</small></p>
+    </section>
+
+    <section class="card s7">
+      <h2>Parsed Events</h2>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>Time</th><th>Type</th><th>Details</th></tr></thead>
+          <tbody id="eventsBody"><tr><td colspan="3" class="muted">Load a log file to get started.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card s12">
+      <h2>Named / Loot Summary</h2>
+      <div class="row">
+        <div>
+          <h3>Kills by Target</h3>
+          <div class="scroll"><table><thead><tr><th>Target</th><th>Kills</th></tr></thead><tbody id="killSummary"></tbody></table></div>
+        </div>
+        <div>
+          <h3>Loot by Item</h3>
+          <div class="scroll"><table><thead><tr><th>Item</th><th>Count</th></tr></thead><tbody id="lootSummary"></tbody></table></div>
+        </div>
+      </div>
+    </section>
+  </div>
+  <footer>Plinkified engineering: because “what the hell was I doing?” should have an answer.</footer>
+</div>
+
+<script>
+let parsedEvents = [];
+let liveFileHandle = null;
+let liveMonitorInterval = null;
+let liveLastSize = 0;
+let liveLastModified = 0;
+let liveFileName = "";
+let timerInterval = null;
+let timerRemaining = 0;
+let timerRunning = false;
+let timerEnd = null;
+
+function savePlanner(){
+  const data = {c1:c1.value,c2:c2.value,c3:c3.value,level:level.value,target:target.value,zone:zone.value,notes:notes.value};
+  localStorage.setItem('plinkEqlPlanner',JSON.stringify(data));
+}
+function loadPlanner(){
+  const d=JSON.parse(localStorage.getItem('plinkEqlPlanner')||'{}');
+  for(const k of ['c1','c2','c3','level','target','zone','notes']) if(d[k]!==undefined) document.getElementById(k).value=d[k];
+}
+function fmt(sec){sec=Math.max(0,Math.floor(sec));return String(Math.floor(sec/60)).padStart(2,'0')+':'+String(sec%60).padStart(2,'0')}
+function updateTimer(){
+  timerDisplay.textContent=fmt(timerRemaining);
+  if(timerRunning && timerEnd){
+    timerRemaining=Math.max(0,Math.round((timerEnd-Date.now())/1000));
+    timerDisplay.textContent=fmt(timerRemaining);
+    timerStatus.textContent=(spawnName.value||'Spawn')+' due at '+new Date(timerEnd).toLocaleTimeString();
+    if(timerRemaining<=0){
+      timerRunning=false; clearInterval(timerInterval);
+      timerStatus.textContent=(spawnName.value||'Spawn')+' SHOULD BE UP!';
+      alert((spawnName.value||'Your spawn')+' should be up!');
+    }
+  }
+}
+function startTimer(){
+  timerRemaining=(+respawnMin.value*60)+(+respawnSec.value);
+  timerEnd=Date.now()+timerRemaining*1000; timerRunning=true;
+  clearInterval(timerInterval); timerInterval=setInterval(updateTimer,250); updateTimer();
+  const hist=JSON.parse(localStorage.getItem('plinkTimerHistory')||'[]');
+  hist.unshift({name:spawnName.value||'Unnamed spawn',seconds:timerRemaining,started:new Date().toLocaleString()});
+  localStorage.setItem('plinkTimerHistory',JSON.stringify(hist.slice(0,12))); renderTimerHistory();
+}
+function pauseTimer(){if(timerRunning){timerRemaining=Math.max(0,Math.round((timerEnd-Date.now())/1000));timerRunning=false;clearInterval(timerInterval);timerStatus.textContent='Paused';updateTimer()}}
+function resumeTimer(){if(!timerRunning&&timerRemaining>0){timerEnd=Date.now()+timerRemaining*1000;timerRunning=true;timerInterval=setInterval(updateTimer,250);updateTimer()}}
+function clearTimer(){timerRunning=false;clearInterval(timerInterval);timerRemaining=(+respawnMin.value*60)+(+respawnSec.value);timerDisplay.textContent=fmt(timerRemaining);timerStatus.textContent='Ready to start'}
+function renderTimerHistory(){
+  const h=JSON.parse(localStorage.getItem('plinkTimerHistory')||'[]');
+  timerHistory.innerHTML=h.length?h.map(x=>`<div class="pill">${escapeHtml(x.name)} — ${fmt(x.seconds)} — ${escapeHtml(x.started)}</div>`).join(''):'<span class="muted">No timers yet.</span>';
+}
+function escapeHtml(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
+function parseTimestamp(line){
+  const m=line.match(/^\[([^\]]+)\]\s*(.*)$/);
+  if(!m)return {date:null,text:line,time:''};
+  const d=new Date(m[1]); return {date:isNaN(d)?null:d,text:m[2],time:m[1]};
+}
+function parseLine(raw){
+  if(!raw.trim())return null;
+  const {date,text:line,time}=parseTimestamp(raw);
+  let type=null,details=null,target=null,item=null;
+  let m;
+  if((m=line.match(/^(?:You|.+?) (?:have |has )?slain (.+?)[.!]?$/i))){type='kill';target=m[1].replace(/[.!]$/,'');details=target}
+  else if((m=line.match(/^You receive loot:?\s*['"]?(.+?)['"]?[.!]?$/i))){type='loot';item=m[1].replace(/[.!]$/,'');details=item}
+  else if((m=line.match(/^You have looted (.+?)[.!]?$/i))){type='loot';item=m[1].replace(/[.!]$/,'');details=item}
+  else if(/you have been slain|you died|you have died/i.test(line)){type='death';details=line}
+  else if((m=line.match(/^(.+?) tells you, ['"](.+)['"]$/i))){type='tell';details=m[1]+': '+m[2]}
+  else if((m=line.match(/^You have entered (.+?)\.?$/i))){type='zone';details=m[1]}
+  return type ? {date,time,type,details,target,item,raw} : null;
+}
+function parseLog(text){
+  parsedEvents=text.split(/\r?\n/).map(parseLine).filter(Boolean);
+  renderParsed();
+}
+function appendLogText(text){
+  const fresh=text.split(/\r?\n/).map(parseLine).filter(Boolean);
+  if(fresh.length){parsedEvents.push(...fresh);renderParsed();}
+}
+function renderParsed(){
+  const body=document.getElementById('eventsBody');
+  body.innerHTML=parsedEvents.length?parsedEvents.slice(-1000).reverse().map(e=>`<tr><td>${escapeHtml(e.time||'—')}</td><td class="event-${e.type}">${e.type.toUpperCase()}</td><td>${escapeHtml(e.details)}</td></tr>`).join(''):'<tr><td colspan="3" class="muted">No recognized events found.</td></tr>';
+  const counts=t=>parsedEvents.filter(e=>e.type===t).length;
+  killCount.textContent=counts('kill');lootCount.textContent=counts('loot');deathCount.textContent=counts('death');tellCount.textContent=counts('tell');
+  const dated=parsedEvents.filter(e=>e.date).sort((a,b)=>a.date-b.date);
+  if(dated.length){sessionStart.textContent=dated[0].date.toLocaleString();sessionEnd.textContent=dated.at(-1).date.toLocaleString();sessionDuration.textContent=formatDuration((dated.at(-1).date-dated[0].date)/1000)}
+  else {sessionStart.textContent='Timestamp not recognized';sessionEnd.textContent='Timestamp not recognized';sessionDuration.textContent='—'}
+  renderSummary('kill',killSummary,'target');renderSummary('loot',lootSummary,'item');
+}
+function renderSummary(type,el,key){
+  const map={};parsedEvents.filter(e=>e.type===type&&e[key]).forEach(e=>map[e[key]]=(map[e[key]]||0)+1);
+  const rows=Object.entries(map).sort((a,b)=>b[1]-a[1]);
+  el.innerHTML=rows.length?rows.map(([n,c])=>`<tr><td>${escapeHtml(n)}</td><td>${c}</td></tr>`).join(''):'<tr><td colspan="2" class="muted">Nothing parsed yet.</td></tr>';
+}
+function formatDuration(sec){sec=Math.max(0,Math.floor(sec));const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;return `${h}h ${m}m ${s}s`}
+function exportParsed(){
+  if(!parsedEvents.length)return alert('No parsed events yet.');
+  const rows=[['timestamp','type','details'],...parsedEvents.map(e=>[e.time,e.type,e.details])];
+  const csv=rows.map(r=>r.map(v=>'"'+String(v??'').replaceAll('"','""')+'"').join(',')).join('\n');
+  const blob=new Blob([csv],{type:'text/csv'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='plinkified-eql-events.csv';a.click();URL.revokeObjectURL(a.href);
+}
+function clearParsed(){parsedEvents=[];renderParsed()}
+const drop=document.getElementById('drop'),fileInput=document.getElementById('fileInput');
+drop.onclick=()=>fileInput.click();
+fileInput.onchange=e=>readFile(e.target.files[0]);
+['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('drag')}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('drag')}));
+function readFile(file){
+  if(!file)return;
+  stopLiveMonitor();
+  const r=new FileReader();
+  r.onload=()=>parseLog(r.result);
+  r.onerror=()=>alert('Could not read that file.');
+  r.readAsText(file);
+  monitorBadge.textContent='● Snapshot loaded';
+  monitorDetail.innerHTML='<small>'+escapeHtml(file.name)+' was read once. Use Choose & Monitor Live for automatic updates.</small>';
+}
+async function chooseLiveFile(){
+  if(!window.showOpenFilePicker){
+    alert('Live monitoring requires Chrome or Edge with File System Access support.');
+    return;
+  }
+  try{
+    const [handle]=await window.showOpenFilePicker({multiple:false,types:[{description:'EQL log files',accept:{'text/plain':['.txt','.log']}}]});
+    await beginLiveMonitor(handle);
+  }catch(err){if(err.name!=='AbortError')alert('Could not open that log: '+err.message);}
+}
+async function beginLiveMonitor(handle){
+  stopLiveMonitor(false);
+  liveFileHandle=handle;
+  const permission=await handle.requestPermission({mode:'read'});
+  if(permission!=='granted')throw new Error('Read permission was not granted.');
+  const file=await handle.getFile();
+  liveFileName=file.name; liveLastSize=file.size; liveLastModified=file.lastModified;
+  parseLog(await file.text());
+  monitorBadge.textContent='● LIVE';
+  monitorDetail.innerHTML='<small>Watching '+escapeHtml(file.name)+' every second — '+file.size.toLocaleString()+' bytes.</small>';
+  liveMonitorInterval=setInterval(checkLiveFile,1000);
+}
+async function checkLiveFile(){
+  if(!liveFileHandle)return;
+  try{
+    const file=await liveFileHandle.getFile();
+    if(file.size<liveLastSize){
+      parseLog(await file.text());
+    }else if(file.size>liveLastSize){
+      const added=await file.slice(liveLastSize).text();
+      appendLogText(added);
+    }
+    liveLastSize=file.size; liveLastModified=file.lastModified;
+    monitorDetail.innerHTML='<small>Watching '+escapeHtml(liveFileName)+' — last checked '+new Date().toLocaleTimeString()+' — '+file.size.toLocaleString()+' bytes.</small>';
+  }catch(err){
+    monitorBadge.textContent='● Monitor error';
+    monitorDetail.innerHTML='<small>'+escapeHtml(err.message)+'</small>';
+  }
+}
+function stopLiveMonitor(update=true){
+  clearInterval(liveMonitorInterval); liveMonitorInterval=null; liveFileHandle=null;
+  if(update){monitorBadge.textContent='● Monitoring stopped';monitorDetail.innerHTML='<small>The parsed session remains on screen.</small>';}
+}
+async function handleDroppedFile(e){
+  const item=e.dataTransfer.items && e.dataTransfer.items[0];
+  if(item && item.getAsFileSystemHandle){
+    try{const handle=await item.getAsFileSystemHandle();if(handle&&handle.kind==='file'){await beginLiveMonitor(handle);return;}}catch(_){}
+  }
+  readFile(e.dataTransfer.files[0]);
+}
+drop.addEventListener('drop',handleDroppedFile);
+document.getElementById('liveFileBtn').addEventListener('click',chooseLiveFile);
+document.getElementById('stopMonitorBtn').addEventListener('click',()=>stopLiveMonitor());
+loadPlanner();renderTimerHistory();clearTimer();renderParsed();
+</script>
+</body>
+</html>
