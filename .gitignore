@@ -1,0 +1,19 @@
+# Runtime data
+Data/
+Logs/
+Exports/
+Screenshots/
+
+# Node
+node_modules/
+
+# VS Code
+.vscode/
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Build output
+dist/
+target/
