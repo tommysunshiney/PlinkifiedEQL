@@ -47,8 +47,16 @@ Development has begun.
 
 ## Documentation
 
-- `VISION.md` — Overall philosophy and long-term goals
-- `ROADMAP.md` — Development milestones and planned features
+| Document | Purpose |
+|----------|---------|
+| `VISION.md` | The long-term purpose and philosophy of PlinkifiedEQL. |
+| `DESIGN.md` | Core design principles and user experience guidelines. |
+| `ROADMAP.md` | Planned milestones and future development. |
+| `CONTRIBUTING.md` | Branch policy, development workflow, and release checklist. |
+| `Docs/feature_requests.md` | Ideas and features for future consideration. |
+| `Docs/log_examples.md` | Sample log entries and parser test cases. |
+| `Docs/parser_notes.md` | Notes, regexes, and parser implementation details. |
+| `Docs/ui_mockups.md` | UI sketches and layout concepts. |
 
 ---
 
