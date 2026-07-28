@@ -1,7 +1,8 @@
-import { app, BrowserWindow } from "electron";
+import { ipcMain, dialog, app, BrowserWindow } from "electron";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import * as fs from "node:fs/promises";
 createRequire(import.meta.url);
 const __dirname$1 = path.dirname(fileURLToPath(import.meta.url));
 process.env.APP_ROOT = path.join(__dirname$1, "..");
@@ -10,6 +11,24 @@ const MAIN_DIST = path.join(process.env.APP_ROOT, "dist-electron");
 const RENDERER_DIST = path.join(process.env.APP_ROOT, "dist");
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, "public") : RENDERER_DIST;
 let win;
+ipcMain.handle("dialog:openLogFile", async () => {
+  const result = await dialog.showOpenDialog({
+    title: "Select EQL Log File",
+    properties: ["openFile"],
+    filters: [
+      { name: "EverQuest Log Files", extensions: ["txt"] },
+      { name: "All Files", extensions: ["*"] }
+    ]
+  });
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+  return result.filePaths[0];
+});
+ipcMain.handle("log:read", async (_, filePath) => {
+  const text = await fs.readFile(filePath, "utf8");
+  return text.split(/\r?\n/).filter((line) => line.length).slice(-50);
+});
 function createWindow() {
   win = new BrowserWindow({
     icon: path.join(process.env.VITE_PUBLIC, "electron-vite.svg"),
