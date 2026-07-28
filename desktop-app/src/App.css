@@ -137,3 +137,60 @@ input {
   background: #142c22;
   color: #79d9a7;
 }
+
+.parser-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(90px, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.parser-stat {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #27384e;
+  border-radius: 9px;
+  background: #0b1420;
+}
+
+.parser-stat span {
+  color: #8fb9dc;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.parser-stat strong {
+  color: #f4f7fb;
+  font-size: 18px;
+}
+
+.log-output {
+  height: 260px;
+  min-height: 260px;
+  max-height: 260px;
+  overflow-y: auto;
+  overflow-x: auto;
+}
+
+.log-line {
+  min-height: 22px;
+  line-height: 22px;
+  white-space: pre-wrap;
+}
+
+.status-badge.connected {
+  border-color: #32634d;
+  background: #142c22;
+  color: #79d9a7;
+}
+
+@media (max-width: 700px) {
+  .parser-summary {
+    grid-template-columns: repeat(2, minmax(90px, 1fr));
+  }
+}
