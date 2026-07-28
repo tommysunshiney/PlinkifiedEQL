@@ -1,9 +1,18 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import './App.css'
 
 function App() {
   const [selectedLog, setSelectedLog] = useState<string>('')
   const [logLines, setLogLines] = useState<string[]>([])
+  const [isConnected, setIsConnected] = useState(false)
+
+useEffect(() => {
+  window.electronAPI.onLogLines((newLines) => {
+    setLogLines((currentLines) =>
+      [...currentLines, ...newLines].slice(-200)
+    )
+  })
+}, [])
 
 async function handleSelectLog() {
   try {
@@ -17,6 +26,8 @@ async function handleSelectLog() {
 
     const lines = await window.electronAPI.readLogFile(filePath)
     setLogLines(lines)
+    await window.electronAPI.startLogWatch(filePath)
+    setIsConnected(true)
   } catch (error) {
     const message =
       error instanceof Error ? error.message : String(error)
@@ -44,7 +55,9 @@ async function handleSelectLog() {
             <p>Select your EverQuest Legacy log file to begin.</p>
           </div>
 
-          <span className="status-badge">Not Connected</span>
+          <span className={`status-badge ${isConnected ? 'connected' : ''}`}>
+             {isConnected ? 'Connected' : 'Not Connected'}
+          </span>
         </div>
 
         <button className="select-button" onClick={handleSelectLog}>

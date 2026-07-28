@@ -131,3 +131,9 @@ input {
   color: #7f91a6;
   font-family: Consolas, monospace;
 }
+
+.status-badge.connected {
+  border-color: #32634d;
+  background: #142c22;
+  color: #79d9a7;
+}

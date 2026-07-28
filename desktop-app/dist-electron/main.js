@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import * as fs from "node:fs/promises";
+import { watchFile, unwatchFile } from "node:fs";
 createRequire(import.meta.url);
 const __dirname$1 = path.dirname(fileURLToPath(import.meta.url));
 process.env.APP_ROOT = path.join(__dirname$1, "..");
@@ -55,6 +56,53 @@ app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow();
   }
+});
+let watchedLogPath = null;
+let watchedLogSize = 0;
+let unfinishedLine = "";
+ipcMain.handle("log:startWatch", async (event, filePath) => {
+  if (watchedLogPath) {
+    unwatchFile(watchedLogPath);
+  }
+  const stats = await fs.stat(filePath);
+  watchedLogPath = filePath;
+  watchedLogSize = stats.size;
+  unfinishedLine = "";
+  watchFile(filePath, { interval: 500 }, async (currentStats) => {
+    try {
+      if (currentStats.size < watchedLogSize) {
+        watchedLogSize = currentStats.size;
+        unfinishedLine = "";
+        return;
+      }
+      if (currentStats.size === watchedLogSize) {
+        return;
+      }
+      const bytesToRead = currentStats.size - watchedLogSize;
+      const file = await fs.open(filePath, "r");
+      const buffer = Buffer.alloc(bytesToRead);
+      await file.read(buffer, 0, bytesToRead, watchedLogSize);
+      await file.close();
+      watchedLogSize = currentStats.size;
+      const text = unfinishedLine + buffer.toString("utf8");
+      const lines = text.split(/\r?\n/);
+      unfinishedLine = lines.pop() ?? "";
+      const completedLines = lines.filter((line) => line.length > 0);
+      if (completedLines.length && !event.sender.isDestroyed()) {
+        event.sender.send("log:newLines", completedLines);
+      }
+    } catch (error) {
+      console.error("Log watch error:", error);
+    }
+  });
+});
+ipcMain.handle("log:stopWatch", () => {
+  if (watchedLogPath) {
+    unwatchFile(watchedLogPath);
+  }
+  watchedLogPath = null;
+  watchedLogSize = 0;
+  unfinishedLine = "";
 });
 app.whenReady().then(createWindow);
 export {
