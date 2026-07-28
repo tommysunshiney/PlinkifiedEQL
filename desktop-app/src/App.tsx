@@ -23,6 +23,11 @@ function App() {
 
   const logOutputRef = useRef<HTMLDivElement>(null)
 
+  const parsedEvents = useMemo(
+  () => logLines.map((line) => parseLine(line)),
+  [logLines]
+ )
+
   useEffect(() => {
     window.electronAPI.onLogLines((newLines) => {
       setLogLines((currentLines) =>
@@ -52,13 +57,12 @@ function App() {
       other: 0
     }
 
-    for (const line of logLines) {
-      const event = parseLine(line)
-      counts[event.type] += 1
+    for (const event of parsedEvents) {
+  counts[event.type] += 1
     }
 
     return counts
-  }, [logLines])
+  }, [parsedEvents])
 
   async function handleSelectLog() {
     try {
@@ -138,15 +142,18 @@ const visibleCategories: EventType[] = [
         </div>
 
         <div className="log-output" ref={logOutputRef}>
-          {logLines.length === 0 ? (
-            <p>Log output will appear here.</p>
-          ) : (
-            logLines.map((line, index) => (
-              <div className="log-line" key={`${index}-${line}`}>
-                {line}
-              </div>
-            ))
-          )}
+          {parsedEvents.length === 0 ? (
+            <p>Parsed events will appear here.</p>
+           ) : (
+             parsedEvents.map((event, index) => (
+               <div
+                  className={`log-line event-${event.type}`}
+                  key={`${index}-${event.text}`}
+            >
+             {event.text}
+          </div>
+              ))
+            )}
         </div>
       </section>
     </main>
