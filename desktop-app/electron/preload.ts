@@ -19,5 +19,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('log:newLines', (_event, lines: string[]) => {
       callback(lines)
     })
-  }
+  },
+
+  startNewSession: (
+    filePath: string,
+  ): Promise<{
+    success: boolean
+    marker: string
+  }> => ipcRenderer.invoke('log:newSession', filePath),
 })

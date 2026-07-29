@@ -8,25 +8,34 @@ import { watchFile, unwatchFile } from 'node:fs'
 const require = createRequire(import.meta.url)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-// The built directory structure
-//
-// ├─┬─┬ dist
-// │ │ └── index.html
-// │ │
-// │ ├─┬ dist-electron
-// │ │ ├── main.js
-// │ │ └── preload.mjs
-// │
 process.env.APP_ROOT = path.join(__dirname, '..')
 
-// 🚧 Use ['ENV_NAME'] avoid vite:define plugin - Vite@2.x
 export const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
 export const MAIN_DIST = path.join(process.env.APP_ROOT, 'dist-electron')
 export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
 
-process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : RENDERER_DIST
+process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
+  ? path.join(process.env.APP_ROOT, 'public')
+  : RENDERER_DIST
 
 let win: BrowserWindow | null
+
+function formatSessionTimestamp(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hour = String(date.getHours()).padStart(2, '0')
+  const minute = String(date.getMinutes()).padStart(2, '0')
+  const second = String(date.getSeconds()).padStart(2, '0')
+
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`
+}
+
+function createSessionMarker(): string {
+  const timestamp = formatSessionTimestamp(new Date())
+
+  return `===== PEQL SESSION START :: ${timestamp} =====`
+}
 
 ipcMain.handle('dialog:openLogFile', async () => {
   const result = await dialog.showOpenDialog({
@@ -34,8 +43,8 @@ ipcMain.handle('dialog:openLogFile', async () => {
     properties: ['openFile'],
     filters: [
       { name: 'EverQuest Log Files', extensions: ['txt'] },
-      { name: 'All Files', extensions: ['*'] }
-    ]
+      { name: 'All Files', extensions: ['*'] },
+    ],
   })
 
   if (result.canceled || result.filePaths.length === 0) {
@@ -50,8 +59,22 @@ ipcMain.handle('log:read', async (_, filePath: string) => {
 
   return text
     .split(/\r?\n/)
-    .filter(line => line.length)
-    .slice(-50)
+    .filter((line) => line.trim().length > 0)
+})
+
+ipcMain.handle('log:newSession', async (_, filePath: string) => {
+  if (!filePath) {
+    throw new Error('No log file selected.')
+  }
+
+  const marker = createSessionMarker()
+
+  await fs.appendFile(filePath, `\r\n${marker}\r\n`, 'utf8')
+
+  return {
+    success: true,
+    marker,
+  }
 })
 
 function createWindow() {
@@ -62,22 +85,20 @@ function createWindow() {
     },
   })
 
-  // Test active push message to Renderer-process.
   win.webContents.on('did-finish-load', () => {
-    win?.webContents.send('main-process-message', (new Date).toLocaleString())
+    win?.webContents.send(
+      'main-process-message',
+      new Date().toLocaleString(),
+    )
   })
 
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL)
   } else {
-    // win.loadFile('dist/index.html')
     win.loadFile(path.join(RENDERER_DIST, 'index.html'))
   }
 }
 
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
@@ -86,8 +107,6 @@ app.on('window-all-closed', () => {
 })
 
 app.on('activate', () => {
-  // On OS X it's common to re-create a window in the app when the
-  // dock icon is clicked and there are no other windows open.
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow()
   }
@@ -134,7 +153,9 @@ ipcMain.handle('log:startWatch', async (event, filePath: string) => {
 
       unfinishedLine = lines.pop() ?? ''
 
-      const completedLines = lines.filter((line) => line.length > 0)
+      const completedLines = lines.filter(
+        (line) => line.trim().length > 0,
+      )
 
       if (completedLines.length && !event.sender.isDestroyed()) {
         event.sender.send('log:newLines', completedLines)

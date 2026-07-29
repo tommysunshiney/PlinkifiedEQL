@@ -12,6 +12,19 @@ const MAIN_DIST = path.join(process.env.APP_ROOT, "dist-electron");
 const RENDERER_DIST = path.join(process.env.APP_ROOT, "dist");
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, "public") : RENDERER_DIST;
 let win;
+function formatSessionTimestamp(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+  const second = String(date.getSeconds()).padStart(2, "0");
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+}
+function createSessionMarker() {
+  const timestamp = formatSessionTimestamp(/* @__PURE__ */ new Date());
+  return `===== PEQL SESSION START :: ${timestamp} =====`;
+}
 ipcMain.handle("dialog:openLogFile", async () => {
   const result = await dialog.showOpenDialog({
     title: "Select EQL Log File",
@@ -28,7 +41,20 @@ ipcMain.handle("dialog:openLogFile", async () => {
 });
 ipcMain.handle("log:read", async (_, filePath) => {
   const text = await fs.readFile(filePath, "utf8");
-  return text.split(/\r?\n/).filter((line) => line.length).slice(-50);
+  return text.split(/\r?\n/).filter((line) => line.trim().length > 0);
+});
+ipcMain.handle("log:newSession", async (_, filePath) => {
+  if (!filePath) {
+    throw new Error("No log file selected.");
+  }
+  const marker = createSessionMarker();
+  await fs.appendFile(filePath, `\r
+${marker}\r
+`, "utf8");
+  return {
+    success: true,
+    marker
+  };
 });
 function createWindow() {
   win = new BrowserWindow({
@@ -38,7 +64,10 @@ function createWindow() {
     }
   });
   win.webContents.on("did-finish-load", () => {
-    win == null ? void 0 : win.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
+    win == null ? void 0 : win.webContents.send(
+      "main-process-message",
+      (/* @__PURE__ */ new Date()).toLocaleString()
+    );
   });
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL);
@@ -87,7 +116,9 @@ ipcMain.handle("log:startWatch", async (event, filePath) => {
       const text = unfinishedLine + buffer.toString("utf8");
       const lines = text.split(/\r?\n/);
       unfinishedLine = lines.pop() ?? "";
-      const completedLines = lines.filter((line) => line.length > 0);
+      const completedLines = lines.filter(
+        (line) => line.trim().length > 0
+      );
       if (completedLines.length && !event.sender.isDestroyed()) {
         event.sender.send("log:newLines", completedLines);
       }

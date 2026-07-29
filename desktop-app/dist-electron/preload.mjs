@@ -10,5 +10,6 @@ electron.contextBridge.exposeInMainWorld("electronAPI", {
     electron.ipcRenderer.on("log:newLines", (_event, lines) => {
       callback(lines);
     });
-  }
+  },
+  startNewSession: (filePath) => electron.ipcRenderer.invoke("log:newSession", filePath)
 });

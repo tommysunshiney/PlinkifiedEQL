@@ -7,5 +7,12 @@ interface Window {
     startLogWatch: (filePath: string) => Promise<void>
     stopLogWatch: () => Promise<void>
     onLogLines: (callback: (lines: string[]) => void) => void
+
+    startNewSession: (
+      filePath: string
+    ) => Promise<{
+      success: boolean
+      marker: string
+    }>
   }
 }
