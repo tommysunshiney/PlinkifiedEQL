@@ -194,3 +194,107 @@ input {
     grid-template-columns: repeat(2, minmax(90px, 1fr));
   }
 }
+
+.dps-panel {
+  margin: 1.25rem 0;
+  padding: 1.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.dps-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.dps-heading > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.dps-label {
+  font-size: 0.75rem;
+  letter-spacing: 0.14em;
+  opacity: 0.65;
+}
+
+.dps-value {
+  font-size: 2.5rem;
+  line-height: 1;
+}
+
+.dps-value small {
+  font-size: 0.9rem;
+  opacity: 0.65;
+}
+
+.fight-status {
+  padding: 0.35rem 0.65rem;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  opacity: 0.7;
+}
+
+.fight-status.fight-active {
+  border-color: rgba(91, 220, 126, 0.7);
+  color: rgb(125, 235, 155);
+  opacity: 1;
+}
+
+.dps-bar-track {
+  width: 100%;
+  height: 18px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.dps-bar-fill {
+  height: 100%;
+  min-width: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    rgb(60, 170, 255),
+    rgb(96, 230, 150),
+    rgb(255, 205, 70)
+  );
+  transition: width 350ms ease-out;
+}
+
+.dps-breakdown {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.dps-breakdown > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.dps-breakdown span {
+  font-size: 0.75rem;
+  opacity: 0.65;
+}
+
+.dps-breakdown strong {
+  font-size: 1.1rem;
+}
+
+@media (max-width: 700px) {
+  .dps-breakdown {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
