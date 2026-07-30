@@ -298,3 +298,201 @@ input {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* Command Center navigation tabs */
+
+.sidebar {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 12px 18px 0;
+  background: #081321;
+  border-bottom: 1px solid #27425f;
+}
+
+.sidebar button {
+  position: relative;
+  border: 1px solid #2c4c6d;
+  border-bottom: none;
+  border-radius: 10px 10px 0 0;
+
+  padding: 10px 16px;
+
+  background: #16304a;
+  color: #b9d9f7;
+
+  font: inherit;
+  font-weight: 700;
+
+  cursor: pointer;
+
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    transform 0.15s ease;
+}
+
+.sidebar button:hover {
+  background: #1d4263;
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.sidebar button.active {
+  background: #2d82bf;
+  color: #ffffff;
+  border-color: #4aa7e6;
+  z-index: 2;
+}
+
+.sidebar button.active::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: #2d82bf;
+}
+
+.layout {
+  min-height: 100vh;
+  background: #081321;
+}
+
+.workspace {
+  min-height: calc(100vh - 55px);
+  background: #0d1d2d;
+}
+
+/* =========================================================
+   COMMAND CENTER THEME OVERRIDES
+   Keep this section at the bottom of App.css
+   ========================================================= */
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+  background: #081321;
+  color: #e8f3ff;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.layout {
+  min-height: 100vh;
+  background: #081321;
+  color: #e8f3ff;
+}
+
+.workspace {
+  min-height: calc(100vh - 61px);
+  background: #0d1d2d;
+  color: #e8f3ff;
+}
+
+/* Main shell header from components/Header.tsx */
+
+.workspace > .app-header {
+  padding: 18px 28px;
+  background: #0d1d2d;
+  border-bottom: 1px solid #29445f;
+  color: #e8f3ff;
+}
+
+.workspace > .app-header h1 {
+  margin: 2px 0 0;
+  color: #ffffff;
+}
+
+.workspace > .app-header .eyebrow {
+  color: #78c6ff;
+}
+
+.workspace > .app-header .version {
+  color: #dcecff;
+}
+
+/* Dashboard text */
+
+.dashboard-page,
+.dashboard-page h1,
+.dashboard-page h2,
+.dashboard-page h3,
+.dashboard-page p,
+.dashboard-page span,
+.dashboard-page strong {
+  color: inherit;
+}
+
+.dashboard-page {
+  color: #e8f3ff;
+}
+
+.dashboard-page .log-panel {
+  color: #e8f3ff;
+}
+
+.dashboard-page .panel-heading h2 {
+  color: #ffffff;
+}
+
+.dashboard-page .panel-heading p {
+  color: #9fc6e5;
+}
+
+.dashboard-page .selected-file {
+  color: #e8f3ff;
+}
+
+.dashboard-page .selected-file strong {
+  color: #7fc9ff;
+}
+
+.dashboard-page .selected-file span,
+.dashboard-page .selected-file p {
+  color: #ffffff;
+}
+
+.dashboard-page .parser-stat span {
+  color: #78c6ff;
+}
+
+.dashboard-page .parser-stat strong {
+  color: #ffffff;
+}
+
+.dashboard-page .dps-label {
+  color: #aab8c5;
+}
+
+.dashboard-page .fight-target {
+  color: #8fd0ff;
+}
+
+.dashboard-page .dps-value {
+  color: #ffffff;
+}
+
+.dashboard-page .dps-value small {
+  color: #aab8c5;
+}
+
+.dashboard-page .dps-breakdown span {
+  color: #9fb0bf;
+}
+
+.dashboard-page .dps-breakdown strong {
+  color: #ffffff;
+}
+
+.dashboard-page .fight-status {
+  color: #d6e0e8;
+}
