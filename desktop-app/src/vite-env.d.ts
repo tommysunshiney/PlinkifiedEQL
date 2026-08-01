@@ -14,5 +14,12 @@ interface Window {
       success: boolean
       marker: string
     }>
+
+    markOhShit: (
+      filePath: string
+    ) => Promise<{
+      success: boolean
+      marker: string
+    }>
   }
 }

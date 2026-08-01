@@ -26,6 +26,20 @@ type DamageResult = {
   target: string
 }
 
+type FightSnapshot = {
+  id: string
+  target: string
+  totalDamage: number
+  fightDps: number
+  rollingDps: number
+  displayDps: number
+  bestHit: number
+  durationSeconds: number
+  firstDamageAt: number
+  lastDamageAt: number
+  active: boolean
+}
+
 const FIGHT_TIMEOUT_MS = 8_000
 const ROLLING_WINDOW_MS = 10_000
 const MAX_VISIBLE_LOG_LINES = 500
@@ -54,8 +68,8 @@ function getPlayerDamage(line: string): DamageResult | null {
    * You hit a lesser mummy for 12 points of damage.
    */
   const directDamage = line.match(
-    /\]\s+You\s+(?:hit|slash|pierce|crush|punch|kick|bash|cleave|backstab|reave|maul|bite|claw|strike)\s+(.+?)\s+for\s+(\d+)\s+points?(?:\s+of\s+[\w-]+)?\s+damage/i
-  )
+    /\]\s+You\s+(?:hit|slash|pierce|crush|punch|kick|bash|cleave|backstab|reave|maul|bite|claw|strike)\s+(.+?)\s+for\s+(\d+)\s+points?(?:\s+of\s+(?:[\w-]+\s+)?)?damage/i
+    )
 
   if (directDamage) {
     return {
@@ -121,13 +135,84 @@ function getPlayerDamage(line: string): DamageResult | null {
   return null
 }
 
+function createFightSnapshot(
+  events: DamageEvent[],
+  clock: number
+): FightSnapshot {
+  const firstEvent = events[0]
+  const lastEvent = events[events.length - 1]
+
+  const fightDurationMilliseconds = Math.max(
+    1000,
+    lastEvent.timestamp - firstEvent.timestamp
+  )
+
+  const durationSeconds =
+    fightDurationMilliseconds / 1000
+
+  const totalDamage = events.reduce(
+    (total, event) => total + event.damage,
+    0
+  )
+
+  const rollingStart = clock - ROLLING_WINDOW_MS
+
+  const rollingDamage = events
+    .filter((event) => event.timestamp >= rollingStart)
+    .reduce(
+      (total, event) => total + event.damage,
+      0
+    )
+
+  const rollingDps =
+    rollingDamage / (ROLLING_WINDOW_MS / 1000)
+
+  const timeSinceLastDamage = Math.max(
+    0,
+    clock - lastEvent.timestamp
+  )
+
+  const active =
+    timeSinceLastDamage <= FIGHT_TIMEOUT_MS
+
+  const decayMultiplier = active
+    ? Math.max(
+        0,
+        1 - timeSinceLastDamage / FIGHT_TIMEOUT_MS
+      )
+    : 0
+
+  return {
+    id: `${firstEvent.timestamp}-${lastEvent.timestamp}-${firstEvent.target.toLowerCase()}`,
+    target: lastEvent.target,
+    totalDamage,
+    fightDps: totalDamage / durationSeconds,
+    rollingDps,
+    displayDps: rollingDps * decayMultiplier,
+    bestHit: Math.max(
+      ...events.map((event) => event.damage)
+    ),
+    durationSeconds,
+    firstDamageAt: firstEvent.timestamp,
+    lastDamageAt: lastEvent.timestamp,
+    active
+  }
+}
+
 export default function DashboardPage() {
   const [selectedLog, setSelectedLog] = useState('')
   const [logLines, setLogLines] = useState<string[]>([])
   const [isConnected, setIsConnected] = useState(false)
   const [clock, setClock] = useState(Date.now())
+  const [selectedFightIndex, setSelectedFightIndex] =
+    useState<number | null>(null)
+  const [ohShitStatus, setOhShitStatus] =
+    useState<'idle' | 'saving' | 'success' | 'error'>('idle')
+  const [ohShitToast, setOhShitToast] = useState('')
 
   const logOutputRef = useRef<HTMLDivElement>(null)
+  const activeFightIdRef = useRef<string | null>(null)
+  const ohShitResetTimerRef = useRef<number | null>(null)
 
   /*
    * Parse the complete loaded log.
@@ -181,6 +266,15 @@ const parsedEvents = useMemo(
     }, 1000)
 
     return () => window.clearInterval(timer)
+  }, [])
+
+
+  useEffect(() => {
+    return () => {
+      if (ohShitResetTimerRef.current !== null) {
+        window.clearTimeout(ohShitResetTimerRef.current)
+      }
+    }
   }, [])
 
   /*
@@ -254,142 +348,172 @@ const parsedEvents = useMemo(
   }, [sessionLines])
 
   /*
-   * Build the current fight by walking backward through the damage
-   * events until an eight-second gap is found.
+   * Split all session damage into fights.
+   *
+   * A new fight begins when the target changes or more than eight
+   * seconds pass between recognized player-damage events.
    */
-  const fightStats = useMemo(() => {
+  const fightHistory = useMemo<FightSnapshot[]>(() => {
     if (playerDamageEvents.length === 0) {
-      return {
-        active: false,
-        target: '',
-        totalDamage: 0,
-        fightDps: 0,
-        rollingDps: 0,
-        displayDps: 0,
-        bestHit: 0,
-        durationSeconds: 0
+      return []
+    }
+
+    const groupedEvents: DamageEvent[][] = []
+    let currentGroup: DamageEvent[] = []
+
+    for (const event of playerDamageEvents) {
+      const previousEvent =
+        currentGroup[currentGroup.length - 1]
+
+      const targetChanged =
+        previousEvent !== undefined &&
+        previousEvent.target.toLowerCase() !==
+          event.target.toLowerCase()
+
+      const gapTooLarge =
+        previousEvent !== undefined &&
+        event.timestamp - previousEvent.timestamp >
+          FIGHT_TIMEOUT_MS
+
+      if (
+        currentGroup.length > 0 &&
+        (targetChanged || gapTooLarge)
+      ) {
+        groupedEvents.push(currentGroup)
+        currentGroup = []
       }
+
+      currentGroup.push(event)
     }
 
-    const newestDamageEvent =
-      playerDamageEvents[playerDamageEvents.length - 1]
-
-    const currentFight: DamageEvent[] = [newestDamageEvent]
-
-    for (
-      let index = playerDamageEvents.length - 2;
-      index >= 0;
-      index -= 1
-    ) {
-      const currentEvent = playerDamageEvents[index]
-      const nextEvent = playerDamageEvents[index + 1]
-
-const gapMilliseconds =
-  nextEvent.timestamp - currentEvent.timestamp
-
-const targetChanged =
-  currentEvent.target.toLowerCase() !==
-  newestDamageEvent.target.toLowerCase()
-
-if (
-  gapMilliseconds > FIGHT_TIMEOUT_MS ||
-  targetChanged
-) {
-  break
-}
-
-currentFight.unshift(currentEvent)
+    if (currentGroup.length > 0) {
+      groupedEvents.push(currentGroup)
     }
 
-    const firstEvent = currentFight[0]
-    const lastEvent = currentFight[currentFight.length - 1]
-
-    const fightDurationMilliseconds = Math.max(
-      1000,
-      lastEvent.timestamp - firstEvent.timestamp
+    return groupedEvents.map((events) =>
+      createFightSnapshot(events, clock)
     )
-
-    const durationSeconds =
-      fightDurationMilliseconds / 1000
-
-    const totalDamage = currentFight.reduce(
-      (total, event) => total + event.damage,
-      0
-    )
-
-    /*
-     * Use the live clock for the rolling window.
-     *
-     * This lets recent damage naturally fall out of the window,
-     * causing the displayed DPS to move downward instead of
-     * remaining frozen at its previous value.
-     */
-    const rollingStart = clock - ROLLING_WINDOW_MS
-
-    const rollingEvents = currentFight.filter(
-      (event) => event.timestamp >= rollingStart
-    )
-
-    const rollingDamage = rollingEvents.reduce(
-      (total, event) => total + event.damage,
-      0
-    )
-
-    const rollingDps =
-      rollingDamage / (ROLLING_WINDOW_MS / 1000)
-
-    const timeSinceLastDamage = Math.max(
-      0,
-      clock - lastEvent.timestamp
-    )
-
-    const active =
-      timeSinceLastDamage <= FIGHT_TIMEOUT_MS
-
-    /*
-     * Add a smooth decay during the eight-second fight timeout.
-     *
-     * The display reaches zero when the fight becomes inactive.
-     */
-    const decayMultiplier = active
-      ? Math.max(
-          0,
-          1 - timeSinceLastDamage / FIGHT_TIMEOUT_MS
-        )
-      : 0
-
-    const displayDps = rollingDps * decayMultiplier
-
-    return {
-      active,
-      target: lastEvent.target,
-      totalDamage,
-      fightDps: totalDamage / durationSeconds,
-      rollingDps,
-      displayDps,
-      bestHit: Math.max(
-        ...currentFight.map((event) => event.damage)
-      ),
-      durationSeconds
-    }
   }, [playerDamageEvents, clock])
 
+  const newestFight =
+    fightHistory[fightHistory.length - 1] ?? null
+
   /*
-   * Adaptive DPS-bar scale.
-   *
-   * Sustained fight DPS should sit around the middle of the bar,
-   * while short bursts can push it toward full.
+   * A genuinely new active fight automatically returns the panel
+   * to Live. Additional hits in the same fight do not interrupt
+   * the user while reviewing history.
    */
+  useEffect(() => {
+    const activeFightId =
+      newestFight?.active ? newestFight.id : null
+
+    if (
+      activeFightId !== null &&
+      activeFightIdRef.current !== activeFightId
+    ) {
+      activeFightIdRef.current = activeFightId
+      setSelectedFightIndex(null)
+    }
+
+    if (activeFightId === null) {
+      activeFightIdRef.current = null
+    }
+  }, [newestFight?.id, newestFight?.active])
+
+  /*
+   * Keep an old selection valid after changing logs or starting
+   * a New Sesh.
+   */
+  useEffect(() => {
+    if (
+      selectedFightIndex !== null &&
+      selectedFightIndex >= fightHistory.length
+    ) {
+      setSelectedFightIndex(null)
+    }
+  }, [fightHistory.length, selectedFightIndex])
+
+  const displayedFight =
+    selectedFightIndex === null
+      ? newestFight
+      : fightHistory[selectedFightIndex] ?? newestFight
+
+  const displayedFightNumber =
+    displayedFight === null
+      ? 0
+      : selectedFightIndex === null
+        ? fightHistory.length
+        : selectedFightIndex + 1
+
+  const isViewingLive =
+    selectedFightIndex === null
+
+  const canGoOlder =
+    fightHistory.length > 1 &&
+    (
+      selectedFightIndex === null ||
+      selectedFightIndex > 0
+    )
+
+  const canGoNewer =
+    selectedFightIndex !== null
+
+  function handleOlderFight() {
+    if (!canGoOlder) {
+      return
+    }
+
+    setSelectedFightIndex((currentIndex) => {
+      if (currentIndex === null) {
+        return Math.max(0, fightHistory.length - 2)
+      }
+
+      return Math.max(0, currentIndex - 1)
+    })
+  }
+
+  function handleNewerFight() {
+    if (!canGoNewer) {
+      return
+    }
+
+    setSelectedFightIndex((currentIndex) => {
+      if (currentIndex === null) {
+        return null
+      }
+
+      const newerIndex = currentIndex + 1
+
+      return newerIndex >= fightHistory.length - 1
+        ? null
+        : newerIndex
+    })
+  }
+
+  const displayedFightDps =
+    displayedFight?.fightDps ?? 0
+
+  /*
+   * Live combat keeps the moving bar. Historical fights show the
+   * final fight DPS so the bar remains stable while reviewing.
+   */
+  const dpsBarValue =
+    displayedFight === null
+      ? 0
+      : isViewingLive && displayedFight.active
+        ? displayedFight.displayDps
+        : displayedFight.fightDps
+
   const dpsBarCeiling = Math.max(
     10,
-    fightStats.fightDps * 1.75
+    displayedFightDps * 1.75
   )
 
   const dpsBarPercent = Math.min(
     100,
     Math.max(
       0,
-      (fightStats.displayDps / dpsBarCeiling) * 100
+      (dpsBarValue / dpsBarCeiling) * 100
     )
   )
 
@@ -406,11 +530,9 @@ currentFight.unshift(currentEvent)
         await window.electronAPI.readLogFile(filePath)
 
       setSelectedLog(filePath)
-
-      /*
-       * Keep the complete log for accurate totals.
-       */
       setLogLines(lines)
+      setSelectedFightIndex(null)
+      activeFightIdRef.current = null
 
       await window.electronAPI.startLogWatch(filePath)
 
@@ -448,11 +570,63 @@ currentFight.unshift(currentEvent)
       await window.electronAPI.readLogFile(selectedLog)
 
     setLogLines(lines)
+    setSelectedFightIndex(null)
+    activeFightIdRef.current = null
   } catch (error) {
     console.error(error)
     alert('Unable to create new session.')
   }
 }
+
+  async function handleOhShit() {
+    if (!selectedLog) {
+      alert('Please select a log file first.')
+      return
+    }
+
+    if (ohShitStatus === 'saving' || ohShitStatus === 'success') {
+      return
+    }
+
+    if (ohShitResetTimerRef.current !== null) {
+      window.clearTimeout(ohShitResetTimerRef.current)
+    }
+
+    setOhShitStatus('saving')
+    setOhShitToast('Dropping combat bookmark...')
+
+    try {
+      const result =
+        await window.electronAPI.markOhShit(selectedLog)
+
+      const markerTime = result.marker.match(
+        /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/
+      )?.[1]
+
+      setOhShitStatus('success')
+      setOhShitToast(
+        markerTime
+          ? `OH SHIT marker added · ${markerTime}`
+          : 'OH SHIT marker added'
+      )
+
+      ohShitResetTimerRef.current = window.setTimeout(() => {
+        setOhShitStatus('idle')
+        setOhShitToast('')
+        ohShitResetTimerRef.current = null
+      }, 2200)
+    } catch (error) {
+      console.error(error)
+      setOhShitStatus('error')
+      setOhShitToast('OH SHIT marker failed')
+
+      ohShitResetTimerRef.current = window.setTimeout(() => {
+        setOhShitStatus('idle')
+        setOhShitToast('')
+        ohShitResetTimerRef.current = null
+      }, 3000)
+    }
+  }
 
   const visibleCategories: EventType[] = [
     'xp',
@@ -512,12 +686,55 @@ currentFight.unshift(currentEvent)
   >
     New Sesh
   </button>
+
+  <button
+    className={`oh-shit-button oh-shit-${ohShitStatus}`}
+    onClick={handleOhShit}
+    disabled={
+      ohShitStatus === 'saving' ||
+      ohShitStatus === 'success'
+    }
+    title="Drop a timestamped combat bookmark into the log"
+  >
+    {ohShitStatus === 'saving'
+      ? 'MARKING...'
+      : ohShitStatus === 'success'
+        ? '✓ MARKED!'
+        : ohShitStatus === 'error'
+          ? '✕ TRY AGAIN'
+          : 'OH SHIT!'}
+  </button>
 </div>
+
+{ohShitToast && (
+  <div
+    className={`peql-toast toast-${ohShitStatus}`}
+    role="status"
+    aria-live="polite"
+  >
+    <strong>
+      {ohShitStatus === 'success'
+        ? '🚨 Combat bookmark recorded'
+        : ohShitStatus === 'error'
+          ? 'Marker failed'
+          : 'Recording marker'}
+    </strong>
+    <span>{ohShitToast}</span>
+  </div>
+)}
 
 <div className="selected-file">
   <strong>Selected file</strong>
   <span>{selectedLog || 'No log file selected.'}</span>
-  <span><p>Total Log Lines: {logLines.length.toLocaleString()}</p></span>
+  <span>
+    Total Log Lines: {logLines.length.toLocaleString()}
+  </span>
+  <span>
+    Session Lines: {sessionLines.length.toLocaleString()}
+  </span>
+  <span>
+    OH SHIT! drops a timestamped marker into the live log.
+  </span>
 </div>
 
         <div className="parser-summary">
@@ -533,34 +750,90 @@ currentFight.unshift(currentEvent)
         </div>
 
         <section className="dps-panel">
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '12px',
+              marginBottom: '12px'
+            }}
+          >
+            <button
+              className="select-button"
+              onClick={handleOlderFight}
+              disabled={!canGoOlder}
+              title="Previous fight"
+              style={{
+                minWidth: '44px',
+                opacity: canGoOlder ? 1 : 0.45
+              }}
+            >
+              ◀
+            </button>
+
+            <strong
+              style={{
+                textAlign: 'center',
+                flex: 1
+              }}
+            >
+              {fightHistory.length === 0
+                ? 'No fights recorded'
+                : isViewingLive
+                  ? `Live · Fight ${displayedFightNumber} of ${fightHistory.length}`
+                  : `Fight ${displayedFightNumber} of ${fightHistory.length}`}
+            </strong>
+
+            <button
+              className="select-button"
+              onClick={handleNewerFight}
+              disabled={!canGoNewer}
+              title="Next fight"
+              style={{
+                minWidth: '44px',
+                opacity: canGoNewer ? 1 : 0.45
+              }}
+            >
+              ▶
+            </button>
+          </div>
+
           <div className="dps-heading">
             <div>
               <span className="dps-label">
-                CURRENT FIGHT
-                {fightStats.target && (
+                {isViewingLive
+                  ? 'CURRENT FIGHT'
+                  : 'FIGHT HISTORY'}
+
+                {displayedFight?.target && (
                   <strong className="fight-target">
                     {' '}
-                    · {fightStats.target}
+                    · {displayedFight.target}
                   </strong>
                 )}
               </span>
 
               <strong className="dps-value">
-                {fightStats.displayDps.toFixed(1)}
+                {displayedFightDps.toFixed(1)}
                 <small> DPS</small>
               </strong>
             </div>
 
             <span
               className={`fight-status ${
-                fightStats.active
+                displayedFight?.active &&
+                isViewingLive
                   ? 'fight-active'
                   : ''
               }`}
             >
-              {fightStats.active
-                ? 'Fighting'
-                : 'Waiting'}
+              {displayedFight === null
+                ? 'Waiting'
+                : isViewingLive &&
+                    displayedFight.active
+                  ? 'Fighting'
+                  : 'Completed'}
             </span>
           </div>
 
@@ -577,26 +850,26 @@ currentFight.unshift(currentEvent)
             <div>
               <span>Fight DPS</span>
               <strong>
-                {fightStats.fightDps.toFixed(1)}
+                {displayedFightDps.toFixed(1)}
               </strong>
             </div>
 
             <div>
               <span>Damage</span>
               <strong>
-                {fightStats.totalDamage.toLocaleString()}
+                {(displayedFight?.totalDamage ?? 0).toLocaleString()}
               </strong>
             </div>
 
             <div>
               <span>Best Hit</span>
-              <strong>{fightStats.bestHit}</strong>
+              <strong>{displayedFight?.bestHit ?? 0}</strong>
             </div>
 
             <div>
               <span>Duration</span>
               <strong>
-                {fightStats.durationSeconds.toFixed(1)}s
+                {(displayedFight?.durationSeconds ?? 0).toFixed(1)}s
               </strong>
             </div>
 
@@ -616,7 +889,11 @@ currentFight.unshift(currentEvent)
           ) : (
             visibleParsedEvents.map((event, index) => (
               <div
-                className={`log-line event-${event.type}`}
+                className={`log-line event-${event.type} ${
+                  event.text.includes('PEQL OH SHIT!')
+                    ? 'oh-shit-log-marker'
+                    : ''
+                }`}
                 key={`${index}-${event.text}`}
               >
                 {event.text}

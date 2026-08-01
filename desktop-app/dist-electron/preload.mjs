@@ -11,5 +11,6 @@ electron.contextBridge.exposeInMainWorld("electronAPI", {
       callback(lines);
     });
   },
-  startNewSession: (filePath) => electron.ipcRenderer.invoke("log:newSession", filePath)
+  startNewSession: (filePath) => electron.ipcRenderer.invoke("log:newSession", filePath),
+  markOhShit: (filePath) => electron.ipcRenderer.invoke("log:ohShit", filePath)
 });

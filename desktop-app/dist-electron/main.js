@@ -25,6 +25,10 @@ function createSessionMarker() {
   const timestamp = formatSessionTimestamp(/* @__PURE__ */ new Date());
   return `===== PEQL SESSION START :: ${timestamp} =====`;
 }
+function createOhShitMarker() {
+  const timestamp = formatSessionTimestamp(/* @__PURE__ */ new Date());
+  return `===== PEQL OH SHIT! :: ${timestamp} =====`;
+}
 ipcMain.handle("dialog:openLogFile", async () => {
   const result = await dialog.showOpenDialog({
     title: "Select EQL Log File",
@@ -48,6 +52,19 @@ ipcMain.handle("log:newSession", async (_, filePath) => {
     throw new Error("No log file selected.");
   }
   const marker = createSessionMarker();
+  await fs.appendFile(filePath, `\r
+${marker}\r
+`, "utf8");
+  return {
+    success: true,
+    marker
+  };
+});
+ipcMain.handle("log:ohShit", async (_, filePath) => {
+  if (!filePath) {
+    throw new Error("No log file selected.");
+  }
+  const marker = createOhShitMarker();
   await fs.appendFile(filePath, `\r
 ${marker}\r
 `, "utf8");

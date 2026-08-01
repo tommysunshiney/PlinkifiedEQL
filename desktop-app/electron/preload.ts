@@ -27,4 +27,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     success: boolean
     marker: string
   }> => ipcRenderer.invoke('log:newSession', filePath),
+
+  markOhShit: (
+    filePath: string,
+  ): Promise<{
+    success: boolean
+    marker: string
+  }> => ipcRenderer.invoke('log:ohShit', filePath),
 })
