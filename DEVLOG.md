@@ -32,3 +32,20 @@ The project now exists as a native Electron desktop application.
 - Organize project folder structure
 - Create reusable React component architecture
 - Begin rebuilding the HTML prototype as React components
+
+## v0.9 Development Progress
+
+Implemented:
+- Shared PEQL session architecture
+- Adventure Journal framework
+- Adventure Journal live session data
+- Fight history navigation
+- Session-aware statistics
+- OH SHIT marker button
+- Live DPS improvements
+- Session line tracking
+
+Design Notes:
+- Dashboard evolving into Combat page
+- Adventure Journal now consumes shared session state
+- Future overlay will read from the same shared session

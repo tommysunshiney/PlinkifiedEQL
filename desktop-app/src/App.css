@@ -801,3 +801,101 @@ textarea {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* Live Adventure Journal data */
+.journal-source {
+  display: block;
+  max-width: 760px;
+  margin-top: 8px;
+  color: #7fa8c6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.journal-badge.connected {
+  border-color: #2e9f68;
+  background: rgba(46, 159, 104, 0.16);
+  color: #8ff0ba;
+}
+
+.journal-timeline {
+  display: grid;
+  gap: 8px;
+  max-height: 560px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.journal-entry {
+  display: grid;
+  grid-template-columns: 84px 30px 1fr;
+  align-items: start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #29445f;
+  border-radius: 9px;
+  background: #0b1927;
+}
+
+.journal-entry time {
+  color: #7fa8c6;
+  font-variant-numeric: tabular-nums;
+}
+
+.journal-entry-icon {
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.journal-entry strong {
+  color: #f4f9ff;
+}
+
+.journal-entry p {
+  margin: 3px 0 0;
+  color: #91abc0;
+}
+
+.journal-entry.entry-incident {
+  border-color: #b94a54;
+  background: rgba(143, 23, 34, 0.16);
+}
+
+
+/* Reliability and combat warnings */
+.page-error,
+.connection-warning,
+.autoattack-warning {
+  max-width: 1100px;
+  margin: 14px auto;
+  padding: 14px 16px;
+  border-radius: 10px;
+}
+
+.page-error {
+  border: 1px solid #a34a55;
+  background: rgba(126, 34, 46, 0.22);
+}
+
+.connection-warning {
+  border: 1px solid #9a6c2e;
+  background: rgba(145, 93, 24, 0.2);
+  color: #ffd89a;
+}
+
+.autoattack-warning {
+  border: 2px solid #ff6b6b;
+  background: rgba(176, 27, 39, 0.34);
+  color: #ffffff;
+  font-weight: 900;
+  text-align: center;
+  letter-spacing: 0.05em;
+  animation: autoattack-warning-pulse 0.7s ease-in-out infinite alternate;
+}
+
+@keyframes autoattack-warning-pulse {
+  from { box-shadow: 0 0 0 rgba(255, 75, 75, 0); }
+  to { box-shadow: 0 0 18px rgba(255, 75, 75, 0.55); }
+}

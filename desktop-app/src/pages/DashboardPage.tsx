@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import '../App.css'
 import { EventType, parseLine } from '../parser'
+import { useSession } from '../session/SessionContext'
+import autoAttackFartUrl from '../assets/auto-attack-fart.mp3'
 
 
 const categoryLabels: Record<EventType, string> = {
@@ -40,10 +42,9 @@ type FightSnapshot = {
   active: boolean
 }
 
-const FIGHT_TIMEOUT_MS = 8_000
+const FIGHT_TIMEOUT_MS = 10_000
 const ROLLING_WINDOW_MS = 10_000
 const MAX_VISIBLE_LOG_LINES = 500
-const SESSION_MARKER = '===== PEQL SESSION START'
 
 function getTimestamp(line: string): number | null {
   const timestampMatch = line.match(/^\[([^\]]+)\]/)
@@ -55,6 +56,10 @@ function getTimestamp(line: string): number | null {
   const timestamp = Date.parse(timestampMatch[1])
 
   return Number.isNaN(timestamp) ? null : timestamp
+}
+
+function isIncomingPlayerAttack(line: string): boolean {
+  return /\]\s+.+?\s+(?:hits|slashes|pierces|crushes|cleaves|kicks|bashes|bites|claws|backstabs|reaves)\s+YOU\s+for\s+\d+\s+points?/i.test(line)
 }
 
 function getPlayerDamage(line: string): DamageResult | null {
@@ -135,6 +140,10 @@ function getPlayerDamage(line: string): DamageResult | null {
   return null
 }
 
+function isOwnSpellLine(line: string): boolean {
+  return /\]\s+(?:You begin casting|You cast|Your .+ spell|You have finished memorizing|You have finished scribing|You forget )/i.test(line)
+}
+
 function createFightSnapshot(
   events: DamageEvent[],
   clock: number
@@ -182,9 +191,17 @@ function createFightSnapshot(
       )
     : 0
 
+  const uniqueTargets = Array.from(
+    new Set(events.map((event) => event.target.toLowerCase()))
+  )
+
+  const targetLabel = uniqueTargets.length === 1
+    ? lastEvent.target
+    : `${firstEvent.target} + ${uniqueTargets.length - 1} add${uniqueTargets.length === 2 ? '' : 's'}`
+
   return {
-    id: `${firstEvent.timestamp}-${lastEvent.timestamp}-${firstEvent.target.toLowerCase()}`,
-    target: lastEvent.target,
+    id: `${firstEvent.timestamp}-${lastEvent.timestamp}-${uniqueTargets.join('|')}`,
+    target: targetLabel,
     totalDamage,
     fightDps: totalDamage / durationSeconds,
     rollingDps,
@@ -200,9 +217,17 @@ function createFightSnapshot(
 }
 
 export default function DashboardPage() {
-  const [selectedLog, setSelectedLog] = useState('')
-  const [logLines, setLogLines] = useState<string[]>([])
-  const [isConnected, setIsConnected] = useState(false)
+  const {
+    selectedLog,
+    logLines,
+    sessionLines,
+    isConnected,
+    connectionError,
+    selectLog,
+    startNewSession,
+    markOhShit
+  } = useSession()
+
   const [clock, setClock] = useState(Date.now())
   const [selectedFightIndex, setSelectedFightIndex] =
     useState<number | null>(null)
@@ -213,6 +238,7 @@ export default function DashboardPage() {
   const logOutputRef = useRef<HTMLDivElement>(null)
   const activeFightIdRef = useRef<string | null>(null)
   const ohShitResetTimerRef = useRef<number | null>(null)
+  const autoAttackAudioRef = useRef<HTMLAudioElement | null>(null)
 
   /*
    * Parse the complete loaded log.
@@ -220,41 +246,10 @@ export default function DashboardPage() {
    * We keep all lines for statistics, but only render the newest
    * 500 lines in the raw-log window.
    */
-const sessionLines = useMemo(() => {
-  let latestMarkerIndex = -1
-
-  for (let index = logLines.length - 1; index >= 0; index -= 1) {
-    if (logLines[index].includes(SESSION_MARKER)) {
-      latestMarkerIndex = index
-      break
-    }
-  }
-
-  return latestMarkerIndex >= 0
-    ? logLines.slice(latestMarkerIndex + 1)
-    : logLines
-}, [logLines])
-
 const parsedEvents = useMemo(
   () => sessionLines.map((line) => parseLine(line)),
   [sessionLines]
 )
-
-  /*
-   * Receive new lines from Electron without deleting older lines.
-   *
-   * Previously, slice(-500) here caused all displayed statistics
-   * to represent only the newest 500 lines instead of the complete
-   * selected log.
-   */
-  useEffect(() => {
-    window.electronAPI.onLogLines((newLines) => {
-      setLogLines((currentLines) => [
-        ...currentLines,
-        ...newLines
-      ])
-    })
-  }, [])
 
   /*
    * Update once per second so fight duration and DPS decay continue
@@ -310,6 +305,8 @@ const parsedEvents = useMemo(
       counts[event.type] += 1
     }
 
+    counts.spell = sessionLines.filter(isOwnSpellLine).length
+
     return counts
   }, [parsedEvents])
 
@@ -347,11 +344,32 @@ const parsedEvents = useMemo(
     return events
   }, [sessionLines])
 
+  const lastCombatActivityAt = useMemo(() => {
+    let latest = playerDamageEvents[playerDamageEvents.length - 1]?.timestamp ?? 0
+
+    for (let index = sessionLines.length - 1; index >= 0; index -= 1) {
+      const line = sessionLines[index]
+
+      if (!isIncomingPlayerAttack(line)) {
+        continue
+      }
+
+      const timestamp = getTimestamp(line)
+
+      if (timestamp !== null) {
+        latest = Math.max(latest, timestamp)
+        break
+      }
+    }
+
+    return latest
+  }, [playerDamageEvents, sessionLines])
+
   /*
    * Split all session damage into fights.
    *
-   * A new fight begins when the target changes or more than eight
-   * seconds pass between recognized player-damage events.
+   * A new encounter begins only after ten seconds without recognized
+   * player damage. Switching among adds stays inside the same fight.
    */
   const fightHistory = useMemo<FightSnapshot[]>(() => {
     if (playerDamageEvents.length === 0) {
@@ -365,20 +383,12 @@ const parsedEvents = useMemo(
       const previousEvent =
         currentGroup[currentGroup.length - 1]
 
-      const targetChanged =
-        previousEvent !== undefined &&
-        previousEvent.target.toLowerCase() !==
-          event.target.toLowerCase()
-
       const gapTooLarge =
         previousEvent !== undefined &&
         event.timestamp - previousEvent.timestamp >
           FIGHT_TIMEOUT_MS
 
-      if (
-        currentGroup.length > 0 &&
-        (targetChanged || gapTooLarge)
-      ) {
+      if (currentGroup.length > 0 && gapTooLarge) {
         groupedEvents.push(currentGroup)
         currentGroup = []
       }
@@ -391,12 +401,42 @@ const parsedEvents = useMemo(
     }
 
     return groupedEvents.map((events) =>
-      createFightSnapshot(events, clock)
+      createFightSnapshot(
+        events,
+        events[events.length - 1].timestamp
+      )
     )
-  }, [playerDamageEvents, clock])
+  }, [playerDamageEvents])
 
-  const newestFight =
+  const newestFightBase =
     fightHistory[fightHistory.length - 1] ?? null
+
+  const newestFight = useMemo<FightSnapshot | null>(() => {
+    if (!newestFightBase) {
+      return null
+    }
+
+    const timeSinceLastDamage = Math.max(
+      0,
+      clock - newestFightBase.lastDamageAt
+    )
+    const active = timeSinceLastDamage <= FIGHT_TIMEOUT_MS
+    const rollingStart = clock - ROLLING_WINDOW_MS
+    const rollingDamage = playerDamageEvents
+      .filter((event) => event.timestamp >= rollingStart)
+      .reduce((total, event) => total + event.damage, 0)
+    const rollingDps = rollingDamage / (ROLLING_WINDOW_MS / 1000)
+    const decayMultiplier = active
+      ? Math.max(0, 1 - timeSinceLastDamage / FIGHT_TIMEOUT_MS)
+      : 0
+
+    return {
+      ...newestFightBase,
+      active,
+      rollingDps,
+      displayDps: rollingDps * decayMultiplier
+    }
+  }, [clock, newestFightBase, playerDamageEvents])
 
   /*
    * A genuinely new active fight automatically returns the panel
@@ -519,64 +559,38 @@ const parsedEvents = useMemo(
 
   async function handleSelectLog() {
     try {
-      const filePath =
-        await window.electronAPI.selectLogFile()
-
-      if (!filePath) {
-        return
-      }
-
-      const lines =
-        await window.electronAPI.readLogFile(filePath)
-
-      setSelectedLog(filePath)
-      setLogLines(lines)
+      await selectLog()
       setSelectedFightIndex(null)
       activeFightIdRef.current = null
-
-      await window.electronAPI.startLogWatch(filePath)
-
-      setIsConnected(true)
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : String(error)
-
       console.error(error)
-      setSelectedLog(`Error: ${message}`)
-      setIsConnected(false)
+      alert('Unable to connect to that log file.')
     }
   }
 
   async function handleNewSession() {
-  if (!selectedLog) {
-    alert('Please select a log file first.')
-    return
+    if (!selectedLog) {
+      alert('Please select a log file first.')
+      return
+    }
+
+    const confirmed = window.confirm(
+      'Start a New Sesh?\n\nCurrent session statistics will reset.'
+    )
+
+    if (!confirmed) {
+      return
+    }
+
+    try {
+      await startNewSession()
+      setSelectedFightIndex(null)
+      activeFightIdRef.current = null
+    } catch (error) {
+      console.error(error)
+      alert('Unable to create new session.')
+    }
   }
-
-  const confirmed = window.confirm(
-    'Start a New Sesh?\n\nCurrent session statistics will reset.'
-  )
-
-  if (!confirmed) {
-    return
-  }
-
-  try {
-    await window.electronAPI.startNewSession(selectedLog)
-
-    const lines =
-      await window.electronAPI.readLogFile(selectedLog)
-
-    setLogLines(lines)
-    setSelectedFightIndex(null)
-    activeFightIdRef.current = null
-  } catch (error) {
-    console.error(error)
-    alert('Unable to create new session.')
-  }
-}
 
   async function handleOhShit() {
     if (!selectedLog) {
@@ -597,7 +611,7 @@ const parsedEvents = useMemo(
 
     try {
       const result =
-        await window.electronAPI.markOhShit(selectedLog)
+        await markOhShit()
 
       const markerTime = result.marker.match(
         /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/
@@ -639,9 +653,55 @@ const parsedEvents = useMemo(
     'tell'
   ]
 
-  const visibleParsedEvents = parsedEvents.slice(
-    -MAX_VISIBLE_LOG_LINES
-  )
+  const visibleParsedEvents = parsedEvents
+    .filter((event) => !/\]\s+Auto attack is (?:on|off)\./i.test(event.text))
+    .slice(-MAX_VISIBLE_LOG_LINES)
+
+  const autoAttackState = useMemo<'on' | 'off' | 'unknown'>(() => {
+    for (let index = sessionLines.length - 1; index >= 0; index -= 1) {
+      if (/\]\s+Auto attack is on\./i.test(sessionLines[index])) return 'on'
+      if (/\]\s+Auto attack is off\./i.test(sessionLines[index])) return 'off'
+    }
+    return 'unknown'
+  }, [sessionLines])
+
+  const combatIsActive =
+    lastCombatActivityAt > 0 &&
+    clock - lastCombatActivityAt <= FIGHT_TIMEOUT_MS
+
+  const autoAttackWarning =
+    combatIsActive && autoAttackState !== 'on'
+
+  useEffect(() => {
+    if (!autoAttackWarning) {
+      const audio = autoAttackAudioRef.current
+
+      if (audio) {
+        audio.pause()
+        audio.currentTime = 0
+      }
+
+      return
+    }
+
+    const audio = new Audio(autoAttackFartUrl)
+    audio.loop = true
+    audio.volume = 1
+    autoAttackAudioRef.current = audio
+
+    void audio.play().catch((error) => {
+      console.error('Auto-attack warning sound failed:', error)
+    })
+
+    return () => {
+      audio.pause()
+      audio.currentTime = 0
+
+      if (autoAttackAudioRef.current === audio) {
+        autoAttackAudioRef.current = null
+      }
+    }
+  }, [autoAttackWarning])
 
   return (
     <div className="dashboard-page">
@@ -652,7 +712,7 @@ const parsedEvents = useMemo(
           <div>
             <h2>Live Log Monitor</h2>
             <p>
-              Select your EverQuest Legacy log file to begin.
+              Select your EverQuest Legends log file to begin.
             </p>
           </div>
 
@@ -666,6 +726,18 @@ const parsedEvents = useMemo(
               : 'Not Connected'}
           </span>
         </div>
+
+        {connectionError && (
+          <div className="connection-warning">
+            Last log reconnect failed: {connectionError}
+          </div>
+        )}
+
+        {autoAttackWarning && (
+          <div className="autoattack-warning" role="alert">
+            ⚠ AUTO ATTACK IS NOT ON — SWING, PECK!
+          </div>
+        )}
 
 <div
   style={{

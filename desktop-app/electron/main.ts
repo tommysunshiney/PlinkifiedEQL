@@ -1,11 +1,9 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
-import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import * as fs from 'node:fs/promises'
 import { watchFile, unwatchFile } from 'node:fs'
 
-const require = createRequire(import.meta.url)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 process.env.APP_ROOT = path.join(__dirname, '..')
@@ -48,7 +46,7 @@ ipcMain.handle('dialog:openLogFile', async () => {
     title: 'Select EQL Log File',
     properties: ['openFile'],
     filters: [
-      { name: 'EverQuest Log Files', extensions: ['txt'] },
+      { name: 'EverQuest Legends Log Files', extensions: ['txt'] },
       { name: 'All Files', extensions: ['*'] },
     ],
   })

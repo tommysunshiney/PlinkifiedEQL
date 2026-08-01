@@ -8,6 +8,7 @@ import LiveLogPage from './pages/LiveLogPage'
 import ParserLabPage from './pages/ParserLabPage'
 import StatisticsPage from './pages/StatisticsPage'
 import SettingsPage from './pages/SettingsPage'
+import PageErrorBoundary from './components/PageErrorBoundary'
 
 export type AppPage =
   | 'dashboard'
@@ -51,7 +52,9 @@ export default function App() {
       currentPage={page}
       onNavigate={setPage}
     >
-      {renderPage()}
+      <PageErrorBoundary key={page}>
+        {renderPage()}
+      </PageErrorBoundary>
     </Layout>
   )
 }
