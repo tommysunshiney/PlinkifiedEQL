@@ -1,0 +1,234 @@
+[
+  {
+    "npcName": "A Alchemist`s Acolyte",
+    "title": null,
+    "zone": "Chardok",
+    "aliases": [],
+    "knownDrops": [
+      "Greenish Metal Shard",
+      "Di`zok Escape Staff",
+      "Ring of Di`zok",
+      "Vile Sarnak Brew"
+    ],
+    "wikiPageTitle": "A Alchemist`s Acolyte",
+    "wikiUrl": "https://eqlwiki.com/A_Alchemist%60s_Acolyte",
+    "sourceRevision": 120613
+  },
+  {
+    "npcName": "A bandit",
+    "title": "Eastern Karana",
+    "zone": "Eastern Karana",
+    "aliases": [
+      "A bandit (Eastern Karana)",
+      "Eastern Karana"
+    ],
+    "knownDrops": [
+      "Cloth Armor",
+      "Bronze Weapons",
+      "Rusty Weapons",
+      "Spectacle",
+      "Water Flask",
+      "Rusty Broad Sword",
+      "Rusty Long Sword",
+      "Bronze Spear",
+      "Rusty Shortened Spear",
+      "Cloth Shawl",
+      "Cloth Cape",
+      "Ration",
+      "Loaf of Bread",
+      "Bottle of Kalish",
+      "Short Ale",
+      "Human Blood",
+      "Bandit Sash",
+      "Small Bag",
+      "Small Box"
+    ],
+    "wikiPageTitle": "A bandit (Eastern Karana)",
+    "wikiUrl": "https://eqlwiki.com/A_bandit_(Eastern_Karana)",
+    "sourceRevision": 164495
+  },
+  {
+    "npcName": "A bandit",
+    "title": "Greater Faydark",
+    "zone": "Greater Faydark",
+    "aliases": [
+      "A bandit (Greater Faydark)",
+      "Greater Faydark"
+    ],
+    "knownDrops": [
+      "Cloth Armor",
+      "Rusty Weapons",
+      "Water Flask",
+      "Ration",
+      "Loaf of Bread",
+      "Bottle of Kalish",
+      "Short Ale",
+      "Wood Elf Parts",
+      "Small Bag"
+    ],
+    "wikiPageTitle": "A bandit (Greater Faydark)",
+    "wikiUrl": "https://eqlwiki.com/A_bandit_(Greater_Faydark)",
+    "sourceRevision": 120617
+  },
+  {
+    "npcName": "A banished kerran",
+    "title": null,
+    "zone": "Kerra Island",
+    "aliases": [],
+    "knownDrops": [
+      "Collector's Kerran Doll"
+    ],
+    "wikiPageTitle": "A banished kerran",
+    "wikiUrl": "https://eqlwiki.com/A_banished_kerran",
+    "sourceRevision": 149237
+  },
+  {
+    "npcName": "A bandit",
+    "title": "Lake Rathe",
+    "zone": "Lake Rathe",
+    "aliases": [
+      "A bandit (Lake Rathe)",
+      "Lake Rathe"
+    ],
+    "knownDrops": [
+      "Cloth Armor",
+      "Bronze Weapons",
+      "Rusty Weapons",
+      "Water Flask",
+      "Ration",
+      "Loaf of Bread",
+      "Bottle of Kalish",
+      "Short Ale",
+      "Human Blood",
+      "Bandit Sash",
+      "Small Bag"
+    ],
+    "wikiPageTitle": "A bandit (Lake Rathe)",
+    "wikiUrl": "https://eqlwiki.com/A_bandit_(Lake_Rathe)",
+    "sourceRevision": 120619
+  },
+  {
+    "npcName": "A bandit",
+    "title": "Lesser Faydark",
+    "zone": "Lesser Faydark",
+    "aliases": [
+      "A bandit (Lesser Faydark)",
+      "Lesser Faydark"
+    ],
+    "knownDrops": [
+      "Cloth Armor",
+      "Bronze Weapons",
+      "Rusty Weapons",
+      "Water Flask",
+      "Ration",
+      "Loaf of Bread",
+      "Bottle of Kalish",
+      "Short Ale",
+      "Human Blood",
+      "Bandit Sash",
+      "Small Bag"
+    ],
+    "wikiPageTitle": "A bandit (Lesser Faydark)",
+    "wikiUrl": "https://eqlwiki.com/A_bandit_(Lesser_Faydark)",
+    "sourceRevision": 120621
+  },
+  {
+    "npcName": "A bandit",
+    "title": "Rathe Mountains",
+    "zone": "Rathe Mountains",
+    "aliases": [
+      "A bandit (Rathe Mountains)",
+      "Rathe Mountains"
+    ],
+    "knownDrops": [
+      "Cloth Armor",
+      "Bronze Weapons",
+      "Rusty Weapons",
+      "Water Flask",
+      "Ration",
+      "Loaf of Bread",
+      "Bottle of Kalish",
+      "Short Ale",
+      "Human Blood",
+      "Bandit Sash",
+      "Small Bag"
+    ],
+    "wikiPageTitle": "A bandit (Rathe Mountains)",
+    "wikiUrl": "https://eqlwiki.com/A_bandit_(Rathe_Mountains)",
+    "sourceRevision": 120623
+  },
+  {
+    "npcName": "A bandit",
+    "title": "Timorous Deep",
+    "zone": "Timorous Deep",
+    "aliases": [
+      "A bandit (Timorous Deep)",
+      "Timorous Deep"
+    ],
+    "knownDrops": [
+      "Small Box",
+      "Rusty Weapons"
+    ],
+    "wikiPageTitle": "A bandit (Timorous Deep)",
+    "wikiUrl": "https://eqlwiki.com/A_bandit_(Timorous_Deep)",
+    "sourceRevision": 85438
+  },
+  {
+    "npcName": "A bandit leader",
+    "title": null,
+    "zone": "Timorous Deep",
+    "aliases": [],
+    "knownDrops": [
+      "Ale",
+      "Rusty Weapons"
+    ],
+    "wikiPageTitle": "A bandit leader",
+    "wikiUrl": "https://eqlwiki.com/A_bandit_leader",
+    "sourceRevision": 85437
+  },
+  {
+    "npcName": "A bandit",
+    "title": "Western Karana",
+    "zone": "Western Karana",
+    "aliases": [
+      "A bandit (Western Karana)",
+      "Western Karana"
+    ],
+    "knownDrops": [
+      "Water Flask",
+      "Bronze Mace",
+      "Bronze Main Gauche",
+      "Bronze Rapier",
+      "Bronze Long Sword",
+      "Bronze Two Handed Sword",
+      "Bronze Two Handed Hammer",
+      "Bronze Shortened Spear",
+      "Bronze Spear",
+      "Bronze Dagger",
+      "Rusty Long Sword",
+      "Rusty Short Sword",
+      "Rusty Broad Sword",
+      "Rusty Morning Star",
+      "Ration",
+      "Iron Ration",
+      "Loaf of Bread",
+      "Cloth Cord",
+      "Cloth Cap",
+      "Cloth Shirt",
+      "Bottle of Kalish",
+      "Short Ale",
+      "Short Beer",
+      "Ale",
+      "Human Blood",
+      "Bandit Sash",
+      "Small Bag",
+      "Small Box",
+      "Backpack",
+      "Words of Eradication",
+      "Bandages"
+    ],
+    "wikiPageTitle": "A bandit (Western Karana)",
+    "wikiUrl": "https://eqlwiki.com/A_bandit_(Western_Karana)",
+    "sourceRevision": 120625
+  }
+]

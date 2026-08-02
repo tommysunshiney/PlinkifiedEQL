@@ -1,8 +1,14 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import * as fs from 'node:fs/promises'
 import { watchFile, unwatchFile } from 'node:fs'
+import {
+  closeDatabase,
+  getDatabaseStatus,
+  initializeDatabase,
+  searchBosses
+} from './database/database'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -40,6 +46,23 @@ function createOhShitMarker(): string {
 
   return `===== PEQL OH SHIT! :: ${timestamp} =====`
 }
+
+
+ipcMain.handle('database:status', () => getDatabaseStatus())
+
+ipcMain.handle(
+  'bosses:search',
+  (_, query: string, zone?: string) => searchBosses(query, zone)
+)
+
+ipcMain.handle('external:open', async (_, url: string) => {
+  const parsed = new URL(url)
+  if (parsed.protocol !== 'https:' || parsed.hostname !== 'eqlwiki.com') {
+    throw new Error('Only EQL Wiki links may be opened from PEQL.')
+  }
+
+  await shell.openExternal(parsed.toString())
+})
 
 ipcMain.handle('dialog:openLogFile', async () => {
   const result = await dialog.showOpenDialog({
@@ -118,6 +141,10 @@ function createWindow() {
   }
 }
 
+app.on('before-quit', () => {
+  closeDatabase()
+})
+
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
@@ -195,4 +222,8 @@ ipcMain.handle('log:stopWatch', () => {
   unfinishedLine = ''
 })
 
-app.whenReady().then(createWindow)
+app.whenReady().then(() => {
+  const status = initializeDatabase()
+  console.log(`PEQL database ready: ${status.path}`)
+  createWindow()
+})

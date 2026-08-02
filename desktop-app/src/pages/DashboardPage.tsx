@@ -28,6 +28,12 @@ type DamageResult = {
   target: string
 }
 
+type CombatState = {
+  lastActivityAt: number
+  autoAttack: 'on' | 'off' | 'unknown'
+  feigned: boolean
+}
+
 type FightSnapshot = {
   id: string
   target: string
@@ -59,7 +65,70 @@ function getTimestamp(line: string): number | null {
 }
 
 function isIncomingPlayerAttack(line: string): boolean {
-  return /\]\s+.+?\s+(?:hits|slashes|pierces|crushes|cleaves|kicks|bashes|bites|claws|backstabs|reaves)\s+YOU\s+for\s+\d+\s+points?/i.test(line)
+  return (
+    /\]\s+.+?\s+(?:hits|slashes|pierces|crushes|cleaves|kicks|bashes|bites|claws|backstabs|reaves)\s+YOU\s+for\s+\d+\s+points?/i.test(line) ||
+    /\]\s+.+?\s+hit you for\s+\d+\s+points?\s+of\s+[\w-]+\s+damage\s+by\s+/i.test(line)
+  )
+}
+
+function isSuccessfulFeign(line: string): boolean {
+  return (
+    /\]\s+.+? has fallen to the ground\./i.test(line) ||
+    /\]\s+Your enemies have forgotten you!/i.test(line)
+  )
+}
+
+function isBrokenOrFailedFeign(line: string): boolean {
+  return (
+    /\]\s+Your Feign Death spell is interrupted\./i.test(line) ||
+    /\]\s+You are no longer feigning death/i.test(line)
+  )
+}
+
+function deriveCombatState(lines: string[]): CombatState {
+  let lastActivityAt = 0
+  let autoAttack: CombatState['autoAttack'] = 'unknown'
+  let feigned = false
+
+  for (const line of lines) {
+    const timestamp = getTimestamp(line)
+    const incomingAttack = isIncomingPlayerAttack(line)
+    const outgoingDamage = getPlayerDamage(line) !== null
+    const combatActivity = incomingAttack || outgoingDamage
+
+    if (
+      combatActivity &&
+      timestamp !== null &&
+      lastActivityAt > 0 &&
+      timestamp - lastActivityAt > FIGHT_TIMEOUT_MS
+    ) {
+      autoAttack = 'unknown'
+      feigned = false
+    }
+
+    if (/\]\s+Auto attack is on\./i.test(line)) {
+      autoAttack = 'on'
+      feigned = false
+    } else if (/\]\s+Auto attack is off\./i.test(line)) {
+      autoAttack = 'off'
+    }
+
+    if (isSuccessfulFeign(line)) {
+      feigned = true
+    } else if (isBrokenOrFailedFeign(line)) {
+      feigned = false
+    }
+
+    if (outgoingDamage) {
+      feigned = false
+    }
+
+    if (combatActivity && timestamp !== null) {
+      lastActivityAt = timestamp
+    }
+  }
+
+  return { lastActivityAt, autoAttack, feigned }
 }
 
 function getPlayerDamage(line: string): DamageResult | null {
@@ -344,26 +413,12 @@ const parsedEvents = useMemo(
     return events
   }, [sessionLines])
 
-  const lastCombatActivityAt = useMemo(() => {
-    let latest = playerDamageEvents[playerDamageEvents.length - 1]?.timestamp ?? 0
+  const combatState = useMemo(
+    () => deriveCombatState(sessionLines),
+    [sessionLines]
+  )
 
-    for (let index = sessionLines.length - 1; index >= 0; index -= 1) {
-      const line = sessionLines[index]
-
-      if (!isIncomingPlayerAttack(line)) {
-        continue
-      }
-
-      const timestamp = getTimestamp(line)
-
-      if (timestamp !== null) {
-        latest = Math.max(latest, timestamp)
-        break
-      }
-    }
-
-    return latest
-  }, [playerDamageEvents, sessionLines])
+  const lastCombatActivityAt = combatState.lastActivityAt
 
   /*
    * Split all session damage into fights.
@@ -657,20 +712,14 @@ const parsedEvents = useMemo(
     .filter((event) => !/\]\s+Auto attack is (?:on|off)\./i.test(event.text))
     .slice(-MAX_VISIBLE_LOG_LINES)
 
-  const autoAttackState = useMemo<'on' | 'off' | 'unknown'>(() => {
-    for (let index = sessionLines.length - 1; index >= 0; index -= 1) {
-      if (/\]\s+Auto attack is on\./i.test(sessionLines[index])) return 'on'
-      if (/\]\s+Auto attack is off\./i.test(sessionLines[index])) return 'off'
-    }
-    return 'unknown'
-  }, [sessionLines])
-
   const combatIsActive =
     lastCombatActivityAt > 0 &&
     clock - lastCombatActivityAt <= FIGHT_TIMEOUT_MS
 
   const autoAttackWarning =
-    combatIsActive && autoAttackState !== 'on'
+    combatIsActive &&
+    !combatState.feigned &&
+    combatState.autoAttack !== 'on'
 
   useEffect(() => {
     if (!autoAttackWarning) {

@@ -1,6 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  getDatabaseStatus: () => ipcRenderer.invoke('database:status'),
+
+  searchBosses: (query: string, zone?: string) =>
+    ipcRenderer.invoke('bosses:search', query, zone),
+
+  openExternal: (url: string): Promise<void> =>
+    ipcRenderer.invoke('external:open', url),
+
   selectLogFile: (): Promise<string | null> =>
     ipcRenderer.invoke('dialog:openLogFile'),
 

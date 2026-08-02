@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useSession } from '../session/SessionContext'
+import type { BossRecord, DatabaseStatus } from '../types/database'
 
 type JournalFilter =
   | 'all'
@@ -159,7 +160,43 @@ function lineToEntry(line: string, index: number): JournalEntry | null {
 export default function AdventureJournalPage() {
   const [activeFilter, setActiveFilter] =
     useState<JournalFilter>('all')
+  const [databaseStatus, setDatabaseStatus] =
+    useState<DatabaseStatus | null>(null)
+  const [bossQuery, setBossQuery] = useState('')
+  const [bossResults, setBossResults] = useState<BossRecord[]>([])
+  const [bossSearchMessage, setBossSearchMessage] = useState('')
   const { selectedLog, sessionLines, isConnected } = useSession()
+
+  useEffect(() => {
+    window.electronAPI
+      .getDatabaseStatus()
+      .then(setDatabaseStatus)
+      .catch((error) => {
+        console.error('Unable to read PEQL database status:', error)
+      })
+  }, [])
+
+  async function handleBossSearch() {
+    const query = bossQuery.trim()
+    if (!query) {
+      setBossResults([])
+      setBossSearchMessage('Type an NPC name or title first.')
+      return
+    }
+
+    try {
+      const results = await window.electronAPI.searchBosses(query)
+      setBossResults(results)
+      setBossSearchMessage(
+        results.length
+          ? `${results.length} boss${results.length === 1 ? '' : 'es'} found.`
+          : 'No matching bosses are in the local catalog yet.'
+      )
+    } catch (error) {
+      console.error(error)
+      setBossSearchMessage('Boss search failed.')
+    }
+  }
 
   const entries = useMemo(() => {
     return sessionLines
@@ -278,8 +315,47 @@ export default function AdventureJournalPage() {
             <div><span>🔌</span><span><strong>Connection</strong><br />{isConnected ? 'Watching the selected log' : 'No active log watch'}</span></div>
             <div><span>📄</span><span><strong>Session lines</strong><br />{sessionLines.length.toLocaleString()} lines since New Sesh</span></div>
             <div><span>⚔️</span><span><strong>Fight details</strong><br />Full DPS snapshots remain on Dashboard</span></div>
-            <div><span>⭐</span><span><strong>Named detection</strong><br />Ready for the EQL Wiki database pass</span></div>
+            <div><span>⭐</span><span><strong>Boss catalog</strong><br />{databaseStatus?.bossCount.toLocaleString() ?? '...'} named mobs loaded</span></div>
+            <div><span>🗄️</span><span><strong>Journal database</strong><br />{databaseStatus?.ready ? `Schema v${databaseStatus.schemaVersion} ready` : 'Starting local database...'}</span></div>
             <div><span>🚨</span><span><strong>Combat bookmarks</strong><br />OH SHIT markers are counted and shown here</span></div>
+          </div>
+
+          <div className="boss-catalog-tool">
+            <h4>Boss Wiki Lookup</h4>
+            <p>
+              Search the bundled named-mob catalog and open its EQL Wiki
+              page in your default browser.
+            </p>
+            <div className="boss-search-row">
+              <input
+                value={bossQuery}
+                onChange={(event) => setBossQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') void handleBossSearch()
+                }}
+                placeholder="NPC name or title"
+              />
+              <button onClick={() => void handleBossSearch()}>Search</button>
+            </div>
+            {bossSearchMessage && (
+              <small className="boss-search-message">{bossSearchMessage}</small>
+            )}
+            <div className="boss-search-results">
+              {bossResults.slice(0, 8).map((boss) => (
+                <article key={boss.id}>
+                  <div>
+                    <strong>{boss.title || boss.npcName}</strong>
+                    {boss.title && <span>{boss.npcName}</span>}
+                    {boss.zone && <small>{boss.zone}</small>}
+                  </div>
+                  <button
+                    onClick={() => void window.electronAPI.openExternal(boss.wikiUrl)}
+                  >
+                    Wiki ↗
+                  </button>
+                </article>
+              ))}
+            </div>
           </div>
         </aside>
       </section>
