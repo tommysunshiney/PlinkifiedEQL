@@ -4,8 +4,11 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState
 } from 'react'
+import { FightEngine } from '../fight-engine'
+import type { FightEngineSnapshot } from '../fight-engine'
 
 const SESSION_MARKER = '===== PEQL SESSION START'
 const LAST_LOG_KEY = 'peql:last-selected-log'
@@ -19,6 +22,7 @@ type SessionContextValue = {
   selectedLog: string
   logLines: string[]
   sessionLines: string[]
+  fightState: FightEngineSnapshot
   isConnected: boolean
   connectionError: string
   selectLog: () => Promise<void>
@@ -45,15 +49,29 @@ function getSessionLines(logLines: string[]): string[] {
 }
 
 export function SessionProvider({ children }: { children: ReactNode }) {
+  const fightEngineRef = useRef(new FightEngine())
   const [selectedLog, setSelectedLog] = useState('')
   const [logLines, setLogLines] = useState<string[]>([])
+  const [fightState, setFightState] = useState<FightEngineSnapshot>(() =>
+    fightEngineRef.current.snapshot()
+  )
   const [isConnected, setIsConnected] = useState(false)
   const [connectionError, setConnectionError] = useState('')
 
   useEffect(() => {
     window.electronAPI.onLogLines((newLines) => {
       setLogLines((currentLines) => [...currentLines, ...newLines])
+      fightEngineRef.current.ingestLines(newLines)
+      setFightState(fightEngineRef.current.snapshot())
     })
+  }, [])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setFightState(fightEngineRef.current.snapshot())
+    }, 1000)
+
+    return () => window.clearInterval(timer)
   }, [])
 
   const sessionLines = useMemo(
@@ -65,8 +83,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const lines = await window.electronAPI.readLogFile(filePath)
     await window.electronAPI.startLogWatch(filePath)
 
+    fightEngineRef.current.reset()
+    fightEngineRef.current.ingestLines(getSessionLines(lines))
+
     setSelectedLog(filePath)
     setLogLines(lines)
+    setFightState(fightEngineRef.current.snapshot())
     setIsConnected(true)
     setConnectionError('')
     window.localStorage.setItem(LAST_LOG_KEY, filePath)
@@ -118,7 +140,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
     await window.electronAPI.startNewSession(selectedLog)
     const lines = await window.electronAPI.readLogFile(selectedLog)
+    fightEngineRef.current.reset()
+    fightEngineRef.current.ingestLines(getSessionLines(lines))
     setLogLines(lines)
+    setFightState(fightEngineRef.current.snapshot())
   }
 
   async function markOhShit(): Promise<MarkerResult> {
@@ -135,6 +160,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         selectedLog,
         logLines,
         sessionLines,
+        fightState,
         isConnected,
         connectionError,
         selectLog,

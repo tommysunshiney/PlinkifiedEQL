@@ -17,272 +17,10 @@ const categoryLabels: Record<EventType, string> = {
   other: 'Other'
 }
 
-type DamageEvent = {
-  timestamp: number
-  damage: number
-  target: string
-}
-
-type DamageResult = {
-  damage: number
-  target: string
-}
-
-type CombatState = {
-  lastActivityAt: number
-  autoAttack: 'on' | 'off' | 'unknown'
-  feigned: boolean
-}
-
-type FightSnapshot = {
-  id: string
-  target: string
-  totalDamage: number
-  fightDps: number
-  rollingDps: number
-  displayDps: number
-  bestHit: number
-  durationSeconds: number
-  firstDamageAt: number
-  lastDamageAt: number
-  active: boolean
-}
-
-const FIGHT_TIMEOUT_MS = 10_000
-const ROLLING_WINDOW_MS = 10_000
 const MAX_VISIBLE_LOG_LINES = 500
-
-function getTimestamp(line: string): number | null {
-  const timestampMatch = line.match(/^\[([^\]]+)\]/)
-
-  if (!timestampMatch) {
-    return null
-  }
-
-  const timestamp = Date.parse(timestampMatch[1])
-
-  return Number.isNaN(timestamp) ? null : timestamp
-}
-
-function isIncomingPlayerAttack(line: string): boolean {
-  return (
-    /\]\s+.+?\s+(?:hits|slashes|pierces|crushes|cleaves|kicks|bashes|bites|claws|backstabs|reaves)\s+YOU\s+for\s+\d+\s+points?/i.test(line) ||
-    /\]\s+.+?\s+hit you for\s+\d+\s+points?\s+of\s+[\w-]+\s+damage\s+by\s+/i.test(line)
-  )
-}
-
-function isSuccessfulFeign(line: string): boolean {
-  return (
-    /\]\s+.+? has fallen to the ground\./i.test(line) ||
-    /\]\s+Your enemies have forgotten you!/i.test(line)
-  )
-}
-
-function isBrokenOrFailedFeign(line: string): boolean {
-  return (
-    /\]\s+Your Feign Death spell is interrupted\./i.test(line) ||
-    /\]\s+You are no longer feigning death/i.test(line)
-  )
-}
-
-function deriveCombatState(lines: string[]): CombatState {
-  let lastActivityAt = 0
-  let autoAttack: CombatState['autoAttack'] = 'unknown'
-  let feigned = false
-
-  for (const line of lines) {
-    const timestamp = getTimestamp(line)
-    const incomingAttack = isIncomingPlayerAttack(line)
-    const outgoingDamage = getPlayerDamage(line) !== null
-    const combatActivity = incomingAttack || outgoingDamage
-
-    if (
-      combatActivity &&
-      timestamp !== null &&
-      lastActivityAt > 0 &&
-      timestamp - lastActivityAt > FIGHT_TIMEOUT_MS
-    ) {
-      autoAttack = 'unknown'
-      feigned = false
-    }
-
-    if (/\]\s+Auto attack is on\./i.test(line)) {
-      autoAttack = 'on'
-      feigned = false
-    } else if (/\]\s+Auto attack is off\./i.test(line)) {
-      autoAttack = 'off'
-    }
-
-    if (isSuccessfulFeign(line)) {
-      feigned = true
-    } else if (isBrokenOrFailedFeign(line)) {
-      feigned = false
-    }
-
-    if (outgoingDamage) {
-      feigned = false
-    }
-
-    if (combatActivity && timestamp !== null) {
-      lastActivityAt = timestamp
-    }
-  }
-
-  return { lastActivityAt, autoAttack, feigned }
-}
-
-function getPlayerDamage(line: string): DamageResult | null {
-  /*
-   * Player melee and direct attacks.
-   *
-   * Examples:
-   * You slash a skeletal excavator for 28 points of damage.
-   * You backstab skeleton L`rodd for 76 points of damage.
-   * You reave a large plague rat for 48 points of damage.
-   * You hit a lesser mummy for 12 points of damage.
-   */
-  const directDamage = line.match(
-    /\]\s+You\s+(?:hit|slash|pierce|crush|punch|kick|bash|cleave|backstab|reave|maul|bite|claw|strike)\s+(.+?)\s+for\s+(\d+)\s+points?(?:\s+of\s+(?:[\w-]+\s+)?)?damage/i
-    )
-
-  if (directDamage) {
-    return {
-      target: directDamage[1].trim(),
-      damage: Number(directDamage[2])
-    }
-  }
-
-  /*
-   * Player spell damage.
-   *
-   * Example:
-   * You hit a skeletal excavator for 46 points of magic damage
-   * by Reaving Strike.
-   */
-  const spellDamage = line.match(
-    /\]\s+You hit\s+(.+?)\s+for\s+(\d+)\s+points?\s+of\s+[\w-]+\s+damage\s+by\s+/i
-  )
-
-  if (spellDamage) {
-    return {
-      target: spellDamage[1].trim(),
-      damage: Number(spellDamage[2])
-    }
-  }
-
-  /*
-   * Player damage-over-time effects.
-   *
-   * Example:
-   * A skeletal excavator has taken 31 damage from your
-   * Stinging Swarm.
-   */
-  const damageOverTime = line.match(
-    /\]\s+(.+?)\s+has taken\s+(\d+)\s+damage from your\s+/i
-  )
-
-  if (damageOverTime) {
-    return {
-      target: damageOverTime[1].trim(),
-      damage: Number(damageOverTime[2])
-    }
-  }
-
-  /*
-   * Player damage-shield damage.
-   *
-   * Example:
-   * Skeleton L`rodd is pierced by YOUR thorns for 7 points
-   * of non-melee damage.
-   */
-  const thornDamage = line.match(
-    /\]\s+(.+?)\s+is pierced by YOUR thorns for\s+(\d+)\s+points?\s+of non-melee damage/i
-  )
-
-  if (thornDamage) {
-    return {
-      target: thornDamage[1].trim(),
-      damage: Number(thornDamage[2])
-    }
-  }
-
-  return null
-}
 
 function isOwnSpellLine(line: string): boolean {
   return /\]\s+(?:You begin casting|You cast|Your .+ spell|You have finished memorizing|You have finished scribing|You forget )/i.test(line)
-}
-
-function createFightSnapshot(
-  events: DamageEvent[],
-  clock: number
-): FightSnapshot {
-  const firstEvent = events[0]
-  const lastEvent = events[events.length - 1]
-
-  const fightDurationMilliseconds = Math.max(
-    1000,
-    lastEvent.timestamp - firstEvent.timestamp
-  )
-
-  const durationSeconds =
-    fightDurationMilliseconds / 1000
-
-  const totalDamage = events.reduce(
-    (total, event) => total + event.damage,
-    0
-  )
-
-  const rollingStart = clock - ROLLING_WINDOW_MS
-
-  const rollingDamage = events
-    .filter((event) => event.timestamp >= rollingStart)
-    .reduce(
-      (total, event) => total + event.damage,
-      0
-    )
-
-  const rollingDps =
-    rollingDamage / (ROLLING_WINDOW_MS / 1000)
-
-  const timeSinceLastDamage = Math.max(
-    0,
-    clock - lastEvent.timestamp
-  )
-
-  const active =
-    timeSinceLastDamage <= FIGHT_TIMEOUT_MS
-
-  const decayMultiplier = active
-    ? Math.max(
-        0,
-        1 - timeSinceLastDamage / FIGHT_TIMEOUT_MS
-      )
-    : 0
-
-  const uniqueTargets = Array.from(
-    new Set(events.map((event) => event.target.toLowerCase()))
-  )
-
-  const targetLabel = uniqueTargets.length === 1
-    ? lastEvent.target
-    : `${firstEvent.target} + ${uniqueTargets.length - 1} add${uniqueTargets.length === 2 ? '' : 's'}`
-
-  return {
-    id: `${firstEvent.timestamp}-${lastEvent.timestamp}-${uniqueTargets.join('|')}`,
-    target: targetLabel,
-    totalDamage,
-    fightDps: totalDamage / durationSeconds,
-    rollingDps,
-    displayDps: rollingDps * decayMultiplier,
-    bestHit: Math.max(
-      ...events.map((event) => event.damage)
-    ),
-    durationSeconds,
-    firstDamageAt: firstEvent.timestamp,
-    lastDamageAt: lastEvent.timestamp,
-    active
-  }
 }
 
 export default function DashboardPage() {
@@ -290,6 +28,7 @@ export default function DashboardPage() {
     selectedLog,
     logLines,
     sessionLines,
+    fightState,
     isConnected,
     connectionError,
     selectLog,
@@ -297,7 +36,6 @@ export default function DashboardPage() {
     markOhShit
   } = useSession()
 
-  const [clock, setClock] = useState(Date.now())
   const [selectedFightIndex, setSelectedFightIndex] =
     useState<number | null>(null)
   const [ohShitStatus, setOhShitStatus] =
@@ -319,19 +57,6 @@ const parsedEvents = useMemo(
   () => sessionLines.map((line) => parseLine(line)),
   [sessionLines]
 )
-
-  /*
-   * Update once per second so fight duration and DPS decay continue
-   * moving even when no new log line arrives.
-   */
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      setClock(Date.now())
-    }, 1000)
-
-    return () => window.clearInterval(timer)
-  }, [])
-
 
   useEffect(() => {
     return () => {
@@ -377,7 +102,7 @@ const parsedEvents = useMemo(
     counts.spell = sessionLines.filter(isOwnSpellLine).length
 
     return counts
-  }, [parsedEvents])
+  }, [parsedEvents, sessionLines])
 
   /*
    * Count explicit character-level gains.
@@ -391,107 +116,11 @@ const parsedEvents = useMemo(
     ).length
   }, [sessionLines])
 
-  /*
-   * Convert recognized player-damage lines into structured events.
-   */
-  const playerDamageEvents = useMemo<DamageEvent[]>(() => {
-    const events: DamageEvent[] = []
-
-   for (const line of sessionLines) {
-      const damageResult = getPlayerDamage(line)
-      const timestamp = getTimestamp(line)
-
-      if (damageResult !== null && timestamp !== null) {
-        events.push({
-          timestamp,
-          damage: damageResult.damage,
-          target: damageResult.target
-        })
-      }
-    }
-
-    return events
-  }, [sessionLines])
-
-  const combatState = useMemo(
-    () => deriveCombatState(sessionLines),
-    [sessionLines]
-  )
-
-  const lastCombatActivityAt = combatState.lastActivityAt
-
-  /*
-   * Split all session damage into fights.
-   *
-   * A new encounter begins only after ten seconds without recognized
-   * player damage. Switching among adds stays inside the same fight.
-   */
-  const fightHistory = useMemo<FightSnapshot[]>(() => {
-    if (playerDamageEvents.length === 0) {
-      return []
-    }
-
-    const groupedEvents: DamageEvent[][] = []
-    let currentGroup: DamageEvent[] = []
-
-    for (const event of playerDamageEvents) {
-      const previousEvent =
-        currentGroup[currentGroup.length - 1]
-
-      const gapTooLarge =
-        previousEvent !== undefined &&
-        event.timestamp - previousEvent.timestamp >
-          FIGHT_TIMEOUT_MS
-
-      if (currentGroup.length > 0 && gapTooLarge) {
-        groupedEvents.push(currentGroup)
-        currentGroup = []
-      }
-
-      currentGroup.push(event)
-    }
-
-    if (currentGroup.length > 0) {
-      groupedEvents.push(currentGroup)
-    }
-
-    return groupedEvents.map((events) =>
-      createFightSnapshot(
-        events,
-        events[events.length - 1].timestamp
-      )
-    )
-  }, [playerDamageEvents])
-
-  const newestFightBase =
-    fightHistory[fightHistory.length - 1] ?? null
-
-  const newestFight = useMemo<FightSnapshot | null>(() => {
-    if (!newestFightBase) {
-      return null
-    }
-
-    const timeSinceLastDamage = Math.max(
-      0,
-      clock - newestFightBase.lastDamageAt
-    )
-    const active = timeSinceLastDamage <= FIGHT_TIMEOUT_MS
-    const rollingStart = clock - ROLLING_WINDOW_MS
-    const rollingDamage = playerDamageEvents
-      .filter((event) => event.timestamp >= rollingStart)
-      .reduce((total, event) => total + event.damage, 0)
-    const rollingDps = rollingDamage / (ROLLING_WINDOW_MS / 1000)
-    const decayMultiplier = active
-      ? Math.max(0, 1 - timeSinceLastDamage / FIGHT_TIMEOUT_MS)
-      : 0
-
-    return {
-      ...newestFightBase,
-      active,
-      rollingDps,
-      displayDps: rollingDps * decayMultiplier
-    }
-  }, [clock, newestFightBase, playerDamageEvents])
+  const fightHistory = fightState.fights
+  const newestFight =
+    fightState.currentFight ??
+    fightHistory[fightHistory.length - 1] ??
+    null
 
   /*
    * A genuinely new active fight automatically returns the panel
@@ -712,14 +341,8 @@ const parsedEvents = useMemo(
     .filter((event) => !/\]\s+Auto attack is (?:on|off)\./i.test(event.text))
     .slice(-MAX_VISIBLE_LOG_LINES)
 
-  const combatIsActive =
-    lastCombatActivityAt > 0 &&
-    clock - lastCombatActivityAt <= FIGHT_TIMEOUT_MS
-
   const autoAttackWarning =
-    combatIsActive &&
-    !combatState.feigned &&
-    combatState.autoAttack !== 'on'
+    fightState.combatState.autoAttackWarning
 
   useEffect(() => {
     if (!autoAttackWarning) {
