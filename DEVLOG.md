@@ -76,3 +76,6 @@ Date: 2026-08-03
   alarm suppression.
 - Compare recorded fight totals against in-game observations and add every new
   real line shape as a regression test.
+
+2026-08-02 — PEQL imported its first complete snapshot of the EverQuest Legends Wiki (6,518 NPC records), establishing the foundation of the PEQL Knowledge Base.
+
