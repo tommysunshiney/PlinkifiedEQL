@@ -53,7 +53,7 @@ export function parseCombatLine(line: string): CombatLogEvent | null {
     return { kind: 'player-spell-cast', timestamp }
   }
 
-  if (/\]\s+.+? has been mesmerized\.\s*$/i.test(line)) {
+  if (/\]\s+.+? has been (?:mesmerized|enthralled)\.\s*$/i.test(line)) {
     return { kind: 'crowd-control', timestamp }
   }
 

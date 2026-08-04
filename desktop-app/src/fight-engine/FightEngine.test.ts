@@ -32,7 +32,7 @@ test('recognizes player damage sources used by the existing parser', () => {
   assert.equal(thorns?.kind, 'player-damage')
 })
 
-test('starts on incoming combat and waits through the two-second alarm grace', () => {
+test('starts on incoming combat and waits through the three-second alarm grace', () => {
   const engine = new FightEngine()
   engine.ingestLines([
     line(0, 'a ghoul slashes YOU for 12 points of damage.')
@@ -40,11 +40,11 @@ test('starts on incoming combat and waits through the two-second alarm grace', (
 
   assert.equal(engine.snapshot(start + 1999).currentFight?.target, 'a ghoul')
   assert.equal(
-    engine.snapshot(start + 1999).combatState.autoAttackWarning,
+    engine.snapshot(start + 2999).combatState.autoAttackWarning,
     false
   )
   assert.equal(
-    engine.snapshot(start + 2000).combatState.autoAttackWarning,
+    engine.snapshot(start + 3000).combatState.autoAttackWarning,
     true
   )
 
@@ -63,11 +63,11 @@ test('briefly pauses the warning while the player casts under attack', () => {
   ])
 
   assert.equal(
-    engine.snapshot(start + 4_999).combatState.autoAttackWarning,
+    engine.snapshot(start + 6_999).combatState.autoAttackWarning,
     false
   )
   assert.equal(
-    engine.snapshot(start + 5_000).combatState.autoAttackWarning,
+    engine.snapshot(start + 7_000).combatState.autoAttackWarning,
     true
   )
 })
@@ -81,11 +81,11 @@ test('renews the warning pause when mez successfully controls a target', () => {
   ])
 
   assert.equal(
-    engine.snapshot(start + 7_999).combatState.autoAttackWarning,
+    engine.snapshot(start + 9_999).combatState.autoAttackWarning,
     false
   )
   assert.equal(
-    engine.snapshot(start + 8_000).combatState.autoAttackWarning,
+    engine.snapshot(start + 10_000).combatState.autoAttackWarning,
     true
   )
 })
@@ -98,7 +98,25 @@ test('does not treat another player mez as the player controlling adds', () => {
   ])
 
   assert.equal(
-    engine.snapshot(start + 2_000).combatState.autoAttackWarning,
+    engine.snapshot(start + 3_000).combatState.autoAttackWarning,
+    true
+  )
+})
+
+test('recognizes Enthrall as successful player crowd control', () => {
+  const engine = new FightEngine()
+  engine.ingestLines([
+    line(0, 'a vis ghoul knight hits YOU for 19 points of damage.'),
+    line(1, 'You begin casting Enthrall VII.'),
+    line(2, 'a vis ghoul knight has been enthralled.')
+  ])
+
+  assert.equal(
+    engine.snapshot(start + 8_999).combatState.autoAttackWarning,
+    false
+  )
+  assert.equal(
+    engine.snapshot(start + 9_000).combatState.autoAttackWarning,
     true
   )
 })
@@ -194,7 +212,7 @@ test('a completed fight resets the alarm for the next hostile pull', () => {
     line(3, 'a mummy hits YOU for 8 points of damage.')
   ])
 
-  const snapshot = engine.snapshot(start + 5000)
+  const snapshot = engine.snapshot(start + 6000)
   assert.equal(snapshot.currentFight?.target, 'a mummy')
   assert.equal(snapshot.combatState.autoAttack, 'unknown')
   assert.equal(snapshot.combatState.autoAttackWarning, true)

@@ -47,6 +47,12 @@ function createOhShitMarker(): string {
   return `===== PEQL OH SHIT! :: ${timestamp} =====`
 }
 
+function createFartMarker(): string {
+  const timestamp = formatSessionTimestamp(new Date())
+
+  return `===== PEQL ==FART== :: ${timestamp} =====`
+}
+
 
 ipcMain.handle('database:status', () => getDatabaseStatus())
 
@@ -110,6 +116,21 @@ ipcMain.handle('log:ohShit', async (_, filePath: string) => {
   }
 
   const marker = createOhShitMarker()
+
+  await fs.appendFile(filePath, `\r\n${marker}\r\n`, 'utf8')
+
+  return {
+    success: true,
+    marker,
+  }
+})
+
+ipcMain.handle('log:fart', async (_, filePath: string) => {
+  if (!filePath) {
+    throw new Error('No log file selected.')
+  }
+
+  const marker = createFartMarker()
 
   await fs.appendFile(filePath, `\r\n${marker}\r\n`, 'utf8')
 

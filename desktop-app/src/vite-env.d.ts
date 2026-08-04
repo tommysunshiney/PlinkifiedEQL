@@ -27,6 +27,13 @@ declare global {
         success: boolean
         marker: string
       }>
+
+      markFart: (
+        filePath: string
+      ) => Promise<{
+        success: boolean
+        marker: string
+      }>
     }
   }
 }

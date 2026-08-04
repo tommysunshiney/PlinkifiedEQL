@@ -93,3 +93,14 @@ Date: 2026-08-04
 - Added a persistent audio-file selector for the auto-attack alarm.
 - Replaced the oversized selected-log box with one compact filename/status row.
 - Expanded the Fight Engine regression suite to 12 passing tests.
+
+## August 4 morning validation
+
+- Replayed Whittler's 13,058-line morning Neriak log.
+- Fixed successful Enthrall casts not being recognized as crowd control.
+- Increased the initial warning grace from two to three seconds.
+- Increased casting suppression from three to five seconds and confirmed-mez
+  suppression from five to seven seconds.
+- Added a regression test using the native `has been enthralled` log shape.
+- Added one timestamped `==FART==` marker to the selected EQL log whenever a
+  new auto-attack warning begins, making future false alarms directly replayable.

@@ -1,6 +1,6 @@
 # Fight Engine parser notes
 
-Last updated: 2026-08-03
+Last updated: 2026-08-04
 
 ## Current encounter rules
 
@@ -20,14 +20,14 @@ Last updated: 2026-08-03
 
 ## Auto-attack reminder
 
-- A fresh incoming hostile action starts a two-second grace window when auto
+- A fresh incoming hostile action starts a three-second grace window when auto
   attack is not known to be on.
 - Turning auto attack on, successfully Feigning Death, or completing the fight
   cancels the pending warning.
 - Outgoing spell or ability damage alone does not trigger the warning.
-- Beginning a player spell cast pauses an already-pending warning for three
+- Beginning a player spell cast pauses an already-pending warning for five
   seconds so intentional casting is not treated as forgotten auto attack.
-- A confirmed player mez extends that pause to five seconds. Continued casting
+- A confirmed player mez extends that pause to seven seconds. Continued casting
   or mezzing renews it; the warning returns if hostile combat continues after
   control activity stops and auto attack remains off.
 - A mez result from another player does not suppress the warning.
@@ -56,3 +56,17 @@ Last updated: 2026-08-03
   ending. Fifty-eight encounters contain multiple tracked targets.
 - Cast and control events affect warning suppression only; they do not create
   encounters or alter DPS calculations.
+
+## August 4 morning log replay
+
+- Replayed all 13,058 lines from Whittler's morning Neriak session.
+- Captured `has been enthralled` as a second native successful-mez result shape;
+  the previous detector recognized only `has been mesmerized`.
+- Tashani commonly landed within one second and Tepid Deeds commonly began
+  about three seconds later, so the generic casting pause was extended to five
+  seconds to cover the normal debuff sequence without silencing the reminder.
+- Extended the initial warning grace to three seconds and the confirmed-control
+  pause to seven seconds to remove brief alarm chirps during target setup.
+- Each new warning now appends a timestamped `==FART==` diagnostic marker to
+  the selected log. The marker is ignored by combat parsing and written only
+  once per continuous warning, even though the alarm audio loops.

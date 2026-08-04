@@ -42,4 +42,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     success: boolean
     marker: string
   }> => ipcRenderer.invoke('log:ohShit', filePath),
+
+  markFart: (
+    filePath: string,
+  ): Promise<{
+    success: boolean
+    marker: string
+  }> => ipcRenderer.invoke('log:fart', filePath),
 })

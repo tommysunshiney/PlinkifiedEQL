@@ -54,6 +54,7 @@ export default function DashboardPage() {
   const activeFightIdRef = useRef<string | null>(null)
   const ohShitResetTimerRef = useRef<number | null>(null)
   const autoAttackAudioRef = useRef<HTMLAudioElement | null>(null)
+  const fartMarkerWrittenRef = useRef(false)
   const alarmSoundInputRef = useRef<HTMLInputElement>(null)
 
   /*
@@ -385,6 +386,7 @@ const parsedEvents = useMemo(
 
   useEffect(() => {
     if (!autoAttackWarning) {
+      fartMarkerWrittenRef.current = false
       const audio = autoAttackAudioRef.current
 
       if (audio) {
@@ -393,6 +395,13 @@ const parsedEvents = useMemo(
       }
 
       return
+    }
+
+    if (selectedLog && !fartMarkerWrittenRef.current) {
+      fartMarkerWrittenRef.current = true
+      void window.electronAPI.markFart(selectedLog).catch((error) => {
+        console.error('Auto-attack warning marker failed:', error)
+      })
     }
 
     const audio = new Audio(alarmSoundUrl)
@@ -412,7 +421,7 @@ const parsedEvents = useMemo(
         autoAttackAudioRef.current = null
       }
     }
-  }, [alarmSoundUrl, autoAttackWarning])
+  }, [alarmSoundUrl, autoAttackWarning, selectedLog])
 
   return (
     <div className="dashboard-page">
