@@ -25,6 +25,12 @@ Last updated: 2026-08-03
 - Turning auto attack on, successfully Feigning Death, or completing the fight
   cancels the pending warning.
 - Outgoing spell or ability damage alone does not trigger the warning.
+- Beginning a player spell cast pauses an already-pending warning for three
+  seconds so intentional casting is not treated as forgotten auto attack.
+- A confirmed player mez extends that pause to five seconds. Continued casting
+  or mezzing renews it; the warning returns if hostile combat continues after
+  control activity stops and auto attack remains off.
+- A mez result from another player does not suppress the warning.
 
 ## August 2 real-log replay
 
@@ -39,9 +45,14 @@ Last updated: 2026-08-03
 - The replay currently yields 358 encounters: 262 victories, 94 timeouts, and
   2 player deaths. Ninety-one encounters contain multiple tracked targets.
 
-## Real-log validation still needed
+## August 3 Enchanter log replay
 
-The Enchanter control-state rules must be driven by captured EQL lines. Add the
-exact mez success, mez break, resist, root, charm, and target-wake messages here
-before teaching the Fight Engine to suppress warnings for controlled mobs. Do
-not guess these strings from classic EverQuest logs.
+- Replayed all 64,543 lines from Whittler's Rogue/Druid/Enchanter session.
+- Captured native player cast (`You begin casting ...`) and successful mez
+  (`<target> has been mesmerized.`) shapes.
+- Also captured mez interruption, wear-off, and overwrite shapes for future
+  per-target control tracking.
+- The replay yields 373 encounters: 284 victories, 88 timeouts, and 1 zone
+  ending. Fifty-eight encounters contain multiple tracked targets.
+- Cast and control events affect warning suppression only; they do not create
+  encounters or alter DPS calculations.

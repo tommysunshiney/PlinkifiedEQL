@@ -79,3 +79,17 @@ Date: 2026-08-03
 
 2026-08-02 — PEQL imported its first complete snapshot of the EverQuest Legends Wiki (6,518 NPC records), establishing the foundation of the PEQL Knowledge Base.
 
+# Development Session 004
+Date: 2026-08-04
+
+## Enchanter-aware auto-attack warning and monitor polish
+
+- Replayed the 64,543-line August 3 Rogue/Druid/Enchanter log.
+- Added a short warning pause when the player begins casting while under attack.
+- Added a renewable control pause after the player's mez successfully lands.
+- Kept unrelated players' mez results from suppressing Whittler's warning.
+- Preserved the original two-second warning grace and automatic warning return
+  when casting/control activity stops while auto attack remains off.
+- Added a persistent audio-file selector for the auto-attack alarm.
+- Replaced the oversized selected-log box with one compact filename/status row.
+- Expanded the Fight Engine regression suite to 12 passing tests.

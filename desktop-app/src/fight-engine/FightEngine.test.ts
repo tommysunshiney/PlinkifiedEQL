@@ -55,6 +55,54 @@ test('starts on incoming combat and waits through the two-second alarm grace', (
   )
 })
 
+test('briefly pauses the warning while the player casts under attack', () => {
+  const engine = new FightEngine()
+  engine.ingestLines([
+    line(0, 'a ghoul slashes YOU for 12 points of damage.'),
+    line(2, 'You begin casting Tepid Deeds.')
+  ])
+
+  assert.equal(
+    engine.snapshot(start + 4_999).combatState.autoAttackWarning,
+    false
+  )
+  assert.equal(
+    engine.snapshot(start + 5_000).combatState.autoAttackWarning,
+    true
+  )
+})
+
+test('renews the warning pause when mez successfully controls a target', () => {
+  const engine = new FightEngine()
+  engine.ingestLines([
+    line(0, 'a ghoul slashes YOU for 12 points of damage.'),
+    line(2, 'You begin casting Mesmerization VII.'),
+    line(3, 'a ghoul has been mesmerized.')
+  ])
+
+  assert.equal(
+    engine.snapshot(start + 7_999).combatState.autoAttackWarning,
+    false
+  )
+  assert.equal(
+    engine.snapshot(start + 8_000).combatState.autoAttackWarning,
+    true
+  )
+})
+
+test('does not treat another player mez as the player controlling adds', () => {
+  const engine = new FightEngine()
+  engine.ingestLines([
+    line(0, 'a ghoul slashes YOU for 12 points of damage.'),
+    line(2, 'a ghoul has been mesmerized.')
+  ])
+
+  assert.equal(
+    engine.snapshot(start + 2_000).combatState.autoAttackWarning,
+    true
+  )
+})
+
 test('recognizes native incoming melee, spell, thorns, and defended attack shapes', () => {
   const nativeLines = [
     'A hardened skeleton punches YOU for 12 points of damage.',

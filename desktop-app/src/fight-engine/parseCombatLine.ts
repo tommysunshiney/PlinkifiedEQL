@@ -10,6 +10,8 @@ export type CombatLogEvent =
   | { kind: 'zone'; timestamp: number }
   | { kind: 'auto-attack'; timestamp: number; enabled: boolean }
   | { kind: 'feign'; timestamp: number; successful: boolean }
+  | { kind: 'player-spell-cast'; timestamp: number }
+  | { kind: 'crowd-control'; timestamp: number }
 
 function cleanName(value: string): string {
   return value.trim().replace(/[.!]+$/, '').trim()
@@ -45,6 +47,14 @@ export function parseCombatLine(line: string): CombatLogEvent | null {
 
   if (timestamp === null) {
     return null
+  }
+
+  if (/\]\s+You begin casting .+\.\s*$/i.test(line)) {
+    return { kind: 'player-spell-cast', timestamp }
+  }
+
+  if (/\]\s+.+? has been mesmerized\.\s*$/i.test(line)) {
+    return { kind: 'crowd-control', timestamp }
   }
 
   let match = line.match(

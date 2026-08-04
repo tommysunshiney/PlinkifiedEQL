@@ -1,6 +1,8 @@
 export const DEFAULT_FIGHT_TIMEOUT_MS = 10_000
 export const DEFAULT_ROLLING_WINDOW_MS = 10_000
 export const DEFAULT_AUTO_ATTACK_GRACE_MS = 2_000
+export const DEFAULT_SPELL_CAST_PAUSE_MS = 3_000
+export const DEFAULT_CROWD_CONTROL_PAUSE_MS = 5_000
 
 export type FightEndReason =
   | 'victory'
@@ -50,6 +52,7 @@ export type CombatState = {
   feigned: boolean
   autoAttackWarningStartedAt: number | null
   autoAttackWarning: boolean
+  autoAttackWarningPausedUntil: number
 }
 
 export type FightEngineSnapshot = {

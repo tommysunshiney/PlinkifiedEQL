@@ -2,8 +2,10 @@ import { parseCombatLine } from './parseCombatLine.ts'
 import type { CombatLogEvent } from './parseCombatLine.ts'
 import {
   DEFAULT_AUTO_ATTACK_GRACE_MS,
+  DEFAULT_CROWD_CONTROL_PAUSE_MS,
   DEFAULT_FIGHT_TIMEOUT_MS,
-  DEFAULT_ROLLING_WINDOW_MS
+  DEFAULT_ROLLING_WINDOW_MS,
+  DEFAULT_SPELL_CAST_PAUSE_MS
 } from './types.ts'
 import type {
   CombatState,
@@ -36,7 +38,8 @@ function emptyCombatState(): CombatState {
     autoAttack: 'unknown',
     feigned: false,
     autoAttackWarningStartedAt: null,
-    autoAttackWarning: false
+    autoAttackWarning: false,
+    autoAttackWarningPausedUntil: 0
   }
 }
 
@@ -47,6 +50,7 @@ export class FightEngine {
   private completedFights: MutableFight[] = []
   private currentFight: MutableFight | null = null
   private combatState: CombatState = emptyCombatState()
+  private lastPlayerSpellCastAt = 0
 
   constructor(options: FightEngineOptions = {}) {
     this.fightTimeoutMs =
@@ -61,6 +65,7 @@ export class FightEngine {
     this.completedFights = []
     this.currentFight = null
     this.combatState = emptyCombatState()
+    this.lastPlayerSpellCastAt = 0
   }
 
   ingestLines(lines: string[]): void {
@@ -86,7 +91,8 @@ export class FightEngine {
       warningStartedAt !== null &&
       clock - warningStartedAt >= this.autoAttackGraceMs &&
       !this.combatState.feigned &&
-      this.combatState.autoAttack !== 'on'
+      this.combatState.autoAttack !== 'on' &&
+      clock >= this.combatState.autoAttackWarningPausedUntil
     )
 
     return {
@@ -142,6 +148,24 @@ export class FightEngine {
         }
         return
 
+      case 'player-spell-cast':
+        this.lastPlayerSpellCastAt = event.timestamp
+        this.pauseAutoAttackWarning(
+          event.timestamp + DEFAULT_SPELL_CAST_PAUSE_MS
+        )
+        return
+
+      case 'crowd-control':
+        if (
+          event.timestamp - this.lastPlayerSpellCastAt <=
+          DEFAULT_SPELL_CAST_PAUSE_MS
+        ) {
+          this.pauseAutoAttackWarning(
+            event.timestamp + DEFAULT_CROWD_CONTROL_PAUSE_MS
+          )
+        }
+        return
+
       case 'kill':
         this.recordKill(event.timestamp, event.target)
         return
@@ -156,6 +180,13 @@ export class FightEngine {
         this.combatState.feigned = false
         return
     }
+  }
+
+  private pauseAutoAttackWarning(until: number): void {
+    this.combatState.autoAttackWarningPausedUntil = Math.max(
+      this.combatState.autoAttackWarningPausedUntil,
+      until
+    )
   }
 
   private recordActivity(timestamp: number, target: string): void {

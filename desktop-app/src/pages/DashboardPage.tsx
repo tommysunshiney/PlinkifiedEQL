@@ -18,6 +18,8 @@ const categoryLabels: Record<EventType, string> = {
 }
 
 const MAX_VISIBLE_LOG_LINES = 500
+const ALARM_SOUND_DATA_KEY = 'peql:auto-attack-alarm-data'
+const ALARM_SOUND_NAME_KEY = 'peql:auto-attack-alarm-name'
 
 function isOwnSpellLine(line: string): boolean {
   return /\]\s+(?:You begin casting|You cast|Your .+ spell|You have finished memorizing|You have finished scribing|You forget )/i.test(line)
@@ -41,11 +43,18 @@ export default function DashboardPage() {
   const [ohShitStatus, setOhShitStatus] =
     useState<'idle' | 'saving' | 'success' | 'error'>('idle')
   const [ohShitToast, setOhShitToast] = useState('')
+  const [alarmSoundUrl, setAlarmSoundUrl] = useState(
+    () => localStorage.getItem(ALARM_SOUND_DATA_KEY) ?? autoAttackFartUrl
+  )
+  const [alarmSoundName, setAlarmSoundName] = useState(
+    () => localStorage.getItem(ALARM_SOUND_NAME_KEY) ?? 'Fart Sounds.mp3'
+  )
 
   const logOutputRef = useRef<HTMLDivElement>(null)
   const activeFightIdRef = useRef<string | null>(null)
   const ohShitResetTimerRef = useRef<number | null>(null)
   const autoAttackAudioRef = useRef<HTMLAudioElement | null>(null)
+  const alarmSoundInputRef = useRef<HTMLInputElement>(null)
 
   /*
    * Parse the complete loaded log.
@@ -65,6 +74,36 @@ const parsedEvents = useMemo(
       }
     }
   }, [])
+
+  const handleSelectAlarmSound = (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = event.target.files?.[0]
+
+    if (!file) return
+
+    const reader = new FileReader()
+
+    reader.addEventListener('load', () => {
+      if (typeof reader.result !== 'string') return
+
+      setAlarmSoundUrl(reader.result)
+      setAlarmSoundName(file.name)
+
+      try {
+        localStorage.setItem(ALARM_SOUND_DATA_KEY, reader.result)
+        localStorage.setItem(ALARM_SOUND_NAME_KEY, file.name)
+      } catch (error) {
+        console.warn(
+          'Alarm sound selected for this run but could not be saved:',
+          error
+        )
+      }
+    })
+
+    reader.readAsDataURL(file)
+    event.target.value = ''
+  }
 
   /*
    * Keep the raw-log display scrolled to the newest visible event.
@@ -356,7 +395,7 @@ const parsedEvents = useMemo(
       return
     }
 
-    const audio = new Audio(autoAttackFartUrl)
+    const audio = new Audio(alarmSoundUrl)
     audio.loop = true
     audio.volume = 1
     autoAttackAudioRef.current = audio
@@ -373,7 +412,7 @@ const parsedEvents = useMemo(
         autoAttackAudioRef.current = null
       }
     }
-  }, [autoAttackWarning])
+  }, [alarmSoundUrl, autoAttackWarning])
 
   return (
     <div className="dashboard-page">
@@ -414,7 +453,8 @@ const parsedEvents = useMemo(
 <div
   style={{
     display: 'flex',
-    gap: '10px'
+    gap: '10px',
+    flexWrap: 'wrap'
   }}
 >
   <button
@@ -422,6 +462,22 @@ const parsedEvents = useMemo(
     onClick={handleSelectLog}
   >
     Select EQL Log File
+  </button>
+
+  <input
+    ref={alarmSoundInputRef}
+    className="visually-hidden"
+    type="file"
+    accept="audio/*,.mp3,.wav,.ogg,.m4a"
+    onChange={handleSelectAlarmSound}
+  />
+
+  <button
+    className="select-button"
+    onClick={() => alarmSoundInputRef.current?.click()}
+    title={`Current alarm: ${alarmSoundName}`}
+  >
+    Alarm Sound
   </button>
 
   <button
@@ -467,17 +523,19 @@ const parsedEvents = useMemo(
   </div>
 )}
 
-<div className="selected-file">
-  <strong>Selected file</strong>
-  <span>{selectedLog || 'No log file selected.'}</span>
-  <span>
-    Total Log Lines: {logLines.length.toLocaleString()}
+<div className="selected-file-line">
+  <strong>Log:</strong>
+  <span title={selectedLog || undefined}>
+    {selectedLog
+      ? selectedLog.split(/[\\/]/).pop()
+      : 'No log file selected.'}
   </span>
-  <span>
-    Session Lines: {sessionLines.length.toLocaleString()}
+  <span className="log-line-counts">
+    {logLines.length.toLocaleString()} total ·{' '}
+    {sessionLines.length.toLocaleString()} this sesh
   </span>
-  <span>
-    OH SHIT! drops a timestamped marker into the live log.
+  <span className="alarm-sound-name" title={alarmSoundName}>
+    Alarm: {alarmSoundName}
   </span>
 </div>
 
