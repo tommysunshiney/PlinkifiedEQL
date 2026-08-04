@@ -32,7 +32,7 @@ test('recognizes player damage sources used by the existing parser', () => {
   assert.equal(thorns?.kind, 'player-damage')
 })
 
-test('starts on incoming combat and waits through the three-second alarm grace', () => {
+test('starts on incoming combat and waits through the five-second alarm grace', () => {
   const engine = new FightEngine()
   engine.ingestLines([
     line(0, 'a ghoul slashes YOU for 12 points of damage.')
@@ -40,17 +40,17 @@ test('starts on incoming combat and waits through the three-second alarm grace',
 
   assert.equal(engine.snapshot(start + 1999).currentFight?.target, 'a ghoul')
   assert.equal(
-    engine.snapshot(start + 2999).combatState.autoAttackWarning,
+    engine.snapshot(start + 4999).combatState.autoAttackWarning,
     false
   )
   assert.equal(
-    engine.snapshot(start + 3000).combatState.autoAttackWarning,
+    engine.snapshot(start + 5000).combatState.autoAttackWarning,
     true
   )
 
-  engine.ingestLines([line(3, 'Auto attack is on.')])
+  engine.ingestLines([line(5, 'Auto attack is on.')])
   assert.equal(
-    engine.snapshot(start + 3000).combatState.autoAttackWarning,
+    engine.snapshot(start + 5000).combatState.autoAttackWarning,
     false
   )
 })
@@ -98,7 +98,7 @@ test('does not treat another player mez as the player controlling adds', () => {
   ])
 
   assert.equal(
-    engine.snapshot(start + 3_000).combatState.autoAttackWarning,
+    engine.snapshot(start + 5_000).combatState.autoAttackWarning,
     true
   )
 })
@@ -212,8 +212,34 @@ test('a completed fight resets the alarm for the next hostile pull', () => {
     line(3, 'a mummy hits YOU for 8 points of damage.')
   ])
 
-  const snapshot = engine.snapshot(start + 6000)
+  const snapshot = engine.snapshot(start + 8000)
   assert.equal(snapshot.currentFight?.target, 'a mummy')
   assert.equal(snapshot.combatState.autoAttack, 'unknown')
   assert.equal(snapshot.combatState.autoAttackWarning, true)
+})
+
+
+test('ignores lingering DOT ticks after a slain target closes the fight', () => {
+  const engine = new FightEngine()
+  engine.ingestLines([
+    line(0, 'You pierce a ghoul for 40 points of damage.'),
+    line(1, 'You have slain a ghoul!'),
+    line(2, 'A ghoul has taken 53 damage from your Immolate.')
+  ])
+
+  const snapshot = engine.snapshot(start + 2_000)
+  assert.equal(snapshot.currentFight, null)
+  assert.equal(snapshot.fights.length, 1)
+  assert.equal(snapshot.fights[0].totalDamage, 40)
+})
+
+test('allows a new same-named target after the post-kill DOT window', () => {
+  const engine = new FightEngine()
+  engine.ingestLines([
+    line(0, 'You pierce a ghoul for 40 points of damage.'),
+    line(1, 'You have slain a ghoul!'),
+    line(14, 'A ghoul has taken 53 damage from your Immolate.')
+  ])
+
+  assert.equal(engine.snapshot(start + 14_000).currentFight?.target, 'A ghoul')
 })

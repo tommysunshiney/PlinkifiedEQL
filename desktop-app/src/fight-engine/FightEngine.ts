@@ -5,7 +5,8 @@ import {
   DEFAULT_CROWD_CONTROL_PAUSE_MS,
   DEFAULT_FIGHT_TIMEOUT_MS,
   DEFAULT_ROLLING_WINDOW_MS,
-  DEFAULT_SPELL_CAST_PAUSE_MS
+  DEFAULT_SPELL_CAST_PAUSE_MS,
+  DEFAULT_POST_KILL_DOT_IGNORE_MS
 } from './types.ts'
 import type {
   CombatState,
@@ -51,6 +52,7 @@ export class FightEngine {
   private currentFight: MutableFight | null = null
   private combatState: CombatState = emptyCombatState()
   private lastPlayerSpellCastAt = 0
+  private recentlyDefeatedTargets = new Map<string, number>()
 
   constructor(options: FightEngineOptions = {}) {
     this.fightTimeoutMs =
@@ -66,6 +68,7 @@ export class FightEngine {
     this.currentFight = null
     this.combatState = emptyCombatState()
     this.lastPlayerSpellCastAt = 0
+    this.recentlyDefeatedTargets.clear()
   }
 
   ingestLines(lines: string[]): void {
@@ -110,6 +113,13 @@ export class FightEngine {
 
     switch (event.kind) {
       case 'player-damage':
+        if (
+          event.source === 'dot' &&
+          !this.currentFight &&
+          this.wasRecentlyDefeated(event.target, event.timestamp)
+        ) {
+          return
+        }
         this.recordActivity(event.timestamp, event.target)
         this.currentFight?.damageEvents.push(event)
         this.combatState.feigned = false
@@ -216,9 +226,10 @@ export class FightEngine {
   }
 
   private recordKill(timestamp: number, target: string): void {
-    if (!this.currentFight) return
-
     const normalizedTarget = normalizeTarget(target)
+    this.recentlyDefeatedTargets.set(normalizedTarget, timestamp)
+
+    if (!this.currentFight) return
     this.currentFight.targets.set(
       normalizedTarget,
       this.currentFight.targets.get(normalizedTarget) ?? target
@@ -239,6 +250,20 @@ export class FightEngine {
     if (everyKnownTargetDefeated) {
       this.finishCurrentFight(timestamp, 'victory')
     }
+  }
+
+  private wasRecentlyDefeated(target: string, timestamp: number): boolean {
+    const normalizedTarget = normalizeTarget(target)
+    const defeatedAt = this.recentlyDefeatedTargets.get(normalizedTarget)
+
+    if (defeatedAt === undefined) return false
+
+    if (timestamp - defeatedAt > DEFAULT_POST_KILL_DOT_IGNORE_MS) {
+      this.recentlyDefeatedTargets.delete(normalizedTarget)
+      return false
+    }
+
+    return true
   }
 
   private closeTimedOutFight(clock: number): void {
