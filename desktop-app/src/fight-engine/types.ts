@@ -4,6 +4,7 @@ export const DEFAULT_AUTO_ATTACK_GRACE_MS = 5_000
 export const DEFAULT_SPELL_CAST_PAUSE_MS = 5_000
 export const DEFAULT_CROWD_CONTROL_PAUSE_MS = 7_000
 export const DEFAULT_POST_KILL_DOT_IGNORE_MS = 12_000
+export const DEFAULT_POST_KILL_COMBAT_IGNORE_MS = 3_000
 
 export type FightEndReason =
   | 'victory'

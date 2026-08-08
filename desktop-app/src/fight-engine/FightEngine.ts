@@ -4,6 +4,7 @@ import {
   DEFAULT_AUTO_ATTACK_GRACE_MS,
   DEFAULT_CROWD_CONTROL_PAUSE_MS,
   DEFAULT_FIGHT_TIMEOUT_MS,
+  DEFAULT_POST_KILL_COMBAT_IGNORE_MS,
   DEFAULT_POST_KILL_DOT_IGNORE_MS,
   DEFAULT_ROLLING_WINDOW_MS,
   DEFAULT_SPELL_CAST_PAUSE_MS
@@ -119,7 +120,11 @@ export class FightEngine {
         if (
           event.source === 'dot' &&
           !this.currentFight &&
-          this.wasRecentlyDefeated(event.target, event.timestamp)
+          this.wasRecentlyDefeated(
+            event.target,
+            event.timestamp,
+            DEFAULT_POST_KILL_DOT_IGNORE_MS
+          )
         ) {
           return
         }
@@ -148,6 +153,15 @@ export class FightEngine {
 
       case 'incoming-damage':
       case 'incoming-miss':
+        if (
+          this.wasRecentlyDefeated(
+            event.attacker,
+            event.timestamp,
+            DEFAULT_POST_KILL_COMBAT_IGNORE_MS
+          )
+        ) {
+          return
+        }
         this.recordActivity(event.timestamp, event.attacker)
         this.combatState.lastIncomingAttackAt = event.timestamp
         if (
@@ -212,9 +226,6 @@ export class FightEngine {
 
   private notePlayerAttackEvidence(timestamp: number): void {
     this.combatState.lastPlayerAttackAt = timestamp
-    // Fresh swing/miss evidence means PEQL must not keep screaming based on an
-    // older "Auto attack is off" line. If AA really is off, the next incoming
-    // attack starts a new grace period and the horn can still fire.
     this.combatState.autoAttackWarningStartedAt = null
   }
 
@@ -247,6 +258,16 @@ export class FightEngine {
   }
 
   private recordPetEvent(event: PendingActorEvent): void {
+    if (
+      this.wasRecentlyDefeated(
+        event.target,
+        event.timestamp,
+        DEFAULT_POST_KILL_COMBAT_IGNORE_MS
+      )
+    ) {
+      return
+    }
+
     this.recordActivity(event.timestamp, event.target)
 
     if (event.kind === 'actor-damage') {
@@ -311,7 +332,11 @@ export class FightEngine {
     if (everyKnownTargetDefeated) this.finishCurrentFight(timestamp, 'victory')
   }
 
-  private wasRecentlyDefeated(target: string, timestamp: number): boolean {
+  private wasRecentlyDefeated(
+    target: string,
+    timestamp: number,
+    windowMs: number
+  ): boolean {
     const normalizedTarget = normalizeName(target)
     const defeatedAt = this.recentlyDefeatedTargets.get(normalizedTarget)
 
@@ -322,7 +347,7 @@ export class FightEngine {
       return false
     }
 
-    return true
+    return timestamp - defeatedAt <= windowMs
   }
 
   private closeTimedOutFight(clock: number): void {

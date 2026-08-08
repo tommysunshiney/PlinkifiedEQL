@@ -16,6 +16,7 @@ type JournalEntryType =
   | 'incident'
   | 'level'
   | 'zone'
+  | 'instance'
   | 'death'
 
 type JournalEntry = {
@@ -26,6 +27,7 @@ type JournalEntry = {
   icon: string
   title: string
   detail: string
+  zoneName?: string
 }
 
 const filters: Array<{ id: JournalFilter; label: string }> = [
@@ -56,6 +58,10 @@ function getTimeLabel(timestamp: number): string {
   })
 }
 
+function cleanZoneName(value: string): string {
+  return value.trim().replace(/\.$/, '').trim()
+}
+
 function lineToEntry(line: string, index: number): JournalEntry | null {
   const timestamp = getTimestamp(line)
   const id = `${timestamp}-${index}`
@@ -74,16 +80,71 @@ function lineToEntry(line: string, index: number): JournalEntry | null {
     }
   }
 
-  match = line.match(/You have entered (.+?)\.?$/i)
+  match = line.match(/Player (.+?) creating instance (.+?) (\d+)\.?$/i)
   if (match) {
+    const character = match[1].trim()
+    const zoneName = cleanZoneName(match[2])
+    const instanceId = match[3]
+
+    return {
+      id,
+      timestamp,
+      timeLabel,
+      type: 'instance',
+      icon: '🧭',
+      title: `${character} created an instance of ${zoneName}`,
+      detail: `Instance #${instanceId} requested.`,
+      zoneName
+    }
+  }
+
+  match = line.match(/You have entered (.+?) (\d+) \((.+?)\)\.?$/i)
+  if (match) {
+    const zoneName = cleanZoneName(match[1])
+    const tier = match[2]
+    const difficulty = match[3].trim()
+
     return {
       id,
       timestamp,
       timeLabel,
       type: 'zone',
       icon: '🗺️',
-      title: `Entered ${match[1]}`,
-      detail: 'Zone transition recorded.'
+      title: `Ventured into ${zoneName}`,
+      detail: `${difficulty} tier (+${tier}).`,
+      zoneName
+    }
+  }
+
+  match = line.match(/You have entered (.+?) - Solo\.?$/i)
+  if (match) {
+    const zoneName = cleanZoneName(match[1])
+
+    return {
+      id,
+      timestamp,
+      timeLabel,
+      type: 'zone',
+      icon: '🗺️',
+      title: `Ventured into ${zoneName}`,
+      detail: 'Solo instance.',
+      zoneName
+    }
+  }
+
+  match = line.match(/You have entered (.+?)\.?$/i)
+  if (match) {
+    const zoneName = cleanZoneName(match[1])
+
+    return {
+      id,
+      timestamp,
+      timeLabel,
+      type: 'zone',
+      icon: '🗺️',
+      title: `Ventured into ${zoneName}`,
+      detail: 'Zone transition recorded.',
+      zoneName
     }
   }
 
@@ -158,10 +219,8 @@ function lineToEntry(line: string, index: number): JournalEntry | null {
 }
 
 export default function AdventureJournalPage() {
-  const [activeFilter, setActiveFilter] =
-    useState<JournalFilter>('all')
-  const [databaseStatus, setDatabaseStatus] =
-    useState<DatabaseStatus | null>(null)
+  const [activeFilter, setActiveFilter] = useState<JournalFilter>('all')
+  const [databaseStatus, setDatabaseStatus] = useState<DatabaseStatus | null>(null)
   const [bossQuery, setBossQuery] = useState('')
   const [bossResults, setBossResults] = useState<BossRecord[]>([])
   const [bossSearchMessage, setBossSearchMessage] = useState('')
@@ -221,10 +280,13 @@ export default function AdventureJournalPage() {
   }, [activeFilter, entries])
 
   const lootCount = entries.filter((entry) => entry.type === 'loot').length
-  const incidentCount = entries.filter(
-    (entry) => entry.type === 'incident'
-  ).length
-  const namedCount = entries.filter((entry) => entry.type === 'named').length
+  const incidentCount = entries.filter((entry) => entry.type === 'incident').length
+  const zoneCount = new Set(
+    entries
+      .filter((entry) => entry.type === 'zone' && entry.zoneName)
+      .map((entry) => entry.zoneName)
+  ).size
+  const instanceCount = entries.filter((entry) => entry.type === 'instance').length
 
   return (
     <main className="journal-page">
@@ -251,25 +313,23 @@ export default function AdventureJournalPage() {
           <strong>{entries.length.toLocaleString()}</strong>
         </article>
         <article className="journal-stat">
-          <span>Named Encounters</span>
-          <strong>{namedCount}</strong>
+          <span>Zones Visited</span>
+          <strong>{zoneCount}</strong>
+        </article>
+        <article className="journal-stat">
+          <span>Instances Created</span>
+          <strong>{instanceCount}</strong>
         </article>
         <article className="journal-stat">
           <span>Loot Recorded</span>
           <strong>{lootCount.toLocaleString()}</strong>
-        </article>
-        <article className="journal-stat">
-          <span>OH SHIT Moments</span>
-          <strong>{incidentCount}</strong>
         </article>
       </section>
 
       <nav className="journal-toolbar" aria-label="Journal filters">
         {filters.map((filter) => (
           <button
-            className={`journal-filter ${
-              activeFilter === filter.id ? 'active' : ''
-            }`}
+            className={`journal-filter ${activeFilter === filter.id ? 'active' : ''}`}
             key={filter.id}
             onClick={() => setActiveFilter(filter.id)}
           >
@@ -287,9 +347,9 @@ export default function AdventureJournalPage() {
               <div>
                 <strong>No matching entries yet</strong>
                 <p>
-                  Keep PEQL connected while you play. Zones, personal
-                  kills, loot, level gains, deaths, and OH SHIT markers
-                  will appear here automatically.
+                  Keep PEQL connected while you play. Zones, instances,
+                  personal kills, loot, level gains, deaths, and OH SHIT
+                  markers will appear here automatically.
                 </p>
               </div>
             </div>
@@ -314,10 +374,11 @@ export default function AdventureJournalPage() {
           <div className="journal-roadmap">
             <div><span>🔌</span><span><strong>Connection</strong><br />{isConnected ? 'Watching the selected log' : 'No active log watch'}</span></div>
             <div><span>📄</span><span><strong>Session lines</strong><br />{sessionLines.length.toLocaleString()} lines since New Sesh</span></div>
+            <div><span>🗺️</span><span><strong>Travel context</strong><br />{zoneCount} zone{zoneCount === 1 ? '' : 's'} · {instanceCount} instance{instanceCount === 1 ? '' : 's'} this sesh</span></div>
             <div><span>⚔️</span><span><strong>Fight details</strong><br />Full DPS snapshots remain on Dashboard</span></div>
             <div><span>⭐</span><span><strong>Boss catalog</strong><br />{databaseStatus?.bossCount.toLocaleString() ?? '...'} named mobs loaded</span></div>
             <div><span>🗄️</span><span><strong>Journal database</strong><br />{databaseStatus?.ready ? `Schema v${databaseStatus.schemaVersion} ready` : 'Starting local database...'}</span></div>
-            <div><span>🚨</span><span><strong>Combat bookmarks</strong><br />OH SHIT markers are counted and shown here</span></div>
+            <div><span>🚨</span><span><strong>Combat bookmarks</strong><br />{incidentCount} OH SHIT marker{incidentCount === 1 ? '' : 's'} this sesh</span></div>
           </div>
 
           <div className="boss-catalog-tool">
@@ -348,9 +409,7 @@ export default function AdventureJournalPage() {
                     {boss.title && <span>{boss.npcName}</span>}
                     {boss.zone && <small>{boss.zone}</small>}
                   </div>
-                  <button
-                    onClick={() => void window.electronAPI.openExternal(boss.wikiUrl)}
-                  >
+                  <button onClick={() => void window.electronAPI.openExternal(boss.wikiUrl)}>
                     Wiki ↗
                   </button>
                 </article>

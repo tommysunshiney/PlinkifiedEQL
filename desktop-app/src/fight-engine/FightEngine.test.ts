@@ -56,14 +56,8 @@ test('still warns when incoming attacks continue and the player stops swinging',
     line(1, 'a ghoul hits YOU for 8 points of damage.')
   ])
 
-  assert.equal(
-    engine.snapshot(start + 5_999).combatState.autoAttackWarning,
-    false
-  )
-  assert.equal(
-    engine.snapshot(start + 6_000).combatState.autoAttackWarning,
-    true
-  )
+  assert.equal(engine.snapshot(start + 5_999).combatState.autoAttackWarning, false)
+  assert.equal(engine.snapshot(start + 6_000).combatState.autoAttackWarning, true)
 })
 
 test('identifies pet from Master speech and counts pet damage in total DPS', () => {
@@ -127,10 +121,52 @@ test('ignores lingering DOT ticks after a slain target closes the fight', () => 
   assert.equal(snapshot.fights[0].totalDamage, 40)
 })
 
+test('ignores immediate corpse melee after the kill line', () => {
+  const engine = new FightEngine()
+  engine.ingestLines([
+    line(0, 'Auto attack is on.'),
+    line(1, 'You pierce an elemental harvester for 94 points of damage.'),
+    line(2, 'You have slain an elemental harvester!'),
+    line(2, 'An elemental harvester hits YOU for 19 points of damage.')
+  ])
+
+  const snapshot = engine.snapshot(start + 8_000)
+  assert.equal(snapshot.currentFight, null)
+  assert.equal(snapshot.fights.length, 1)
+  assert.equal(snapshot.combatState.autoAttackWarning, false)
+})
+
+test('ignores immediate pet follow-through on a slain target', () => {
+  const engine = new FightEngine()
+  engine.ingestLines([
+    line(0, "Gabaner told you, 'Attacking a ghoul Master.'"),
+    line(1, 'You slash a ghoul for 40 points of damage.'),
+    line(2, 'You have slain a ghoul!'),
+    line(3, 'Gabaner slashes a ghoul for 20 points of damage.')
+  ])
+
+  const snapshot = engine.snapshot(start + 8_000)
+  assert.equal(snapshot.currentFight, null)
+  assert.equal(snapshot.fights.length, 1)
+  assert.equal(snapshot.fights[0].petDamage, 0)
+})
+
+test('allows clear player melee evidence to start a same-named new target immediately', () => {
+  const engine = new FightEngine()
+  engine.ingestLines([
+    line(0, 'You slash a ghoul for 40 points of damage.'),
+    line(1, 'You have slain a ghoul!'),
+    line(2, 'You slash a ghoul for 30 points of damage.')
+  ])
+
+  const snapshot = engine.snapshot(start + 2_000)
+  assert.equal(snapshot.fights.length, 2)
+  assert.equal(snapshot.currentFight?.target, 'a ghoul')
+  assert.equal(snapshot.currentFight?.totalDamage, 30)
+})
+
 test('recognizes pet kill line shape from live log', () => {
-  const event = parseCombatLine(
-    line(0, 'A zol ghoul knight has been slain by Zonartik!')
-  )
+  const event = parseCombatLine(line(0, 'A zol ghoul knight has been slain by Zonartik!'))
 
   assert.equal(event?.kind, 'kill')
   if (event?.kind === 'kill') {
