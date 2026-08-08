@@ -1,17 +1,24 @@
-import type { DamageSource, FightDamageEvent } from './types.ts'
+import type {
+  CombatantType,
+  DamageSource,
+  FightDamageEvent
+} from './types.ts'
 
 export type CombatLogEvent =
   | ({ kind: 'player-damage' } & FightDamageEvent)
+  | ({ kind: 'actor-damage' } & FightDamageEvent)
   | { kind: 'player-miss'; timestamp: number; target: string }
+  | { kind: 'actor-miss'; timestamp: number; actor: string; target: string }
   | { kind: 'incoming-damage'; timestamp: number; attacker: string }
   | { kind: 'incoming-miss'; timestamp: number; attacker: string }
-  | { kind: 'kill'; timestamp: number; target: string }
+  | { kind: 'kill'; timestamp: number; target: string; killer: string | null }
   | { kind: 'death'; timestamp: number }
   | { kind: 'zone'; timestamp: number }
   | { kind: 'auto-attack'; timestamp: number; enabled: boolean }
   | { kind: 'feign'; timestamp: number; successful: boolean }
   | { kind: 'player-spell-cast'; timestamp: number }
-  | { kind: 'crowd-control'; timestamp: number }
+  | { kind: 'crowd-control'; timestamp: number; target: string }
+  | { kind: 'pet-identity'; timestamp: number; pet: string }
 
 function cleanName(value: string): string {
   return value.trim().replace(/[.!]+$/, '').trim()
@@ -20,9 +27,7 @@ function cleanName(value: string): string {
 export function getLogTimestamp(line: string): number | null {
   const timestampText = line.match(/^\[([^\]]+)\]/)?.[1]
 
-  if (!timestampText) {
-    return null
-  }
+  if (!timestampText) return null
 
   const timestamp = Date.parse(timestampText)
   return Number.isNaN(timestamp) ? null : timestamp
@@ -31,60 +36,152 @@ export function getLogTimestamp(line: string): number | null {
 function damageEvent(
   match: RegExpMatchArray,
   timestamp: number,
-  source: DamageSource
-): CombatLogEvent {
+  source: DamageSource,
+  actor: string,
+  actorType: CombatantType
+): FightDamageEvent {
   return {
-    kind: 'player-damage',
     timestamp,
     target: cleanName(match[1]),
     damage: Number(match[2]),
-    source
+    source,
+    actor,
+    actorType
   }
 }
 
 export function parseCombatLine(line: string): CombatLogEvent | null {
   const timestamp = getLogTimestamp(line)
 
-  if (timestamp === null) {
-    return null
+  if (timestamp === null) return null
+
+  let match = line.match(/\]\s+(.+?) told you, '.*\bMaster\.'\s*$/i)
+  if (match) {
+    return {
+      kind: 'pet-identity',
+      timestamp,
+      pet: cleanName(match[1])
+    }
   }
 
   if (/\]\s+You begin casting .+\.\s*$/i.test(line)) {
     return { kind: 'player-spell-cast', timestamp }
   }
 
-  if (/\]\s+.+? has been (?:mesmerized|enthralled)\.\s*$/i.test(line)) {
-    return { kind: 'crowd-control', timestamp }
+  match = line.match(/\]\s+(.+?) has been (?:mesmerized|enthralled)\.\s*$/i)
+  if (match) {
+    return {
+      kind: 'crowd-control',
+      timestamp,
+      target: cleanName(match[1])
+    }
   }
 
-  let match = line.match(
+  match = line.match(
     /\]\s+You\s+(?:hit|slash|pierce|crush|punch|kick|bash|cleave|backstab|reave|maul|bite|claw|strike)\s+(.+?)\s+for\s+(\d+)\s+points?(?:\s+of\s+(?:[\w-]+\s+)?)?damage/i
   )
-  if (match) return damageEvent(match, timestamp, 'melee')
+  if (match) {
+    return {
+      kind: 'player-damage',
+      ...damageEvent(match, timestamp, 'melee', 'You', 'player')
+    }
+  }
 
   match = line.match(
     /\]\s+You hit\s+(.+?)\s+for\s+(\d+)\s+points?\s+of\s+[\w-]+\s+damage\s+by\s+/i
   )
-  if (match) return damageEvent(match, timestamp, 'spell')
+  if (match) {
+    return {
+      kind: 'player-damage',
+      ...damageEvent(match, timestamp, 'spell', 'You', 'player')
+    }
+  }
 
   match = line.match(
     /\]\s+(.+?)\s+has taken\s+(\d+)\s+damage from your\s+/i
   )
-  if (match) return damageEvent(match, timestamp, 'dot')
+  if (match) {
+    return {
+      kind: 'player-damage',
+      ...damageEvent(match, timestamp, 'dot', 'You', 'player')
+    }
+  }
 
   match = line.match(
     /\]\s+(.+?)\s+is pierced by YOUR thorns for\s+(\d+)\s+points?\s+of non-melee damage/i
   )
-  if (match) return damageEvent(match, timestamp, 'damage-shield')
+  if (match) {
+    return {
+      kind: 'player-damage',
+      ...damageEvent(match, timestamp, 'damage-shield', 'You', 'player')
+    }
+  }
 
   match = line.match(
     /\]\s+You try to (?:hit|slash|pierce|crush|punch|kick|bash|cleave|backstab|reave|maul|bite|claw|strike)\s+(.+?),?\s+but (?:miss|.+?\s+(?:dodges|parries|blocks))/i
   )
-  if (!match) {
-    match = line.match(/\]\s+You miss\s+(.+?)[.!]?$/i)
-  }
+  if (!match) match = line.match(/\]\s+You miss\s+(.+?)[.!]?$/i)
   if (match) {
     return { kind: 'player-miss', timestamp, target: cleanName(match[1]) }
+  }
+
+  // Generic actor spell damage. The FightEngine only accepts it if the actor
+  // has been positively identified as the player's pet.
+  match = line.match(
+    /\]\s+(.+?) hit\s+(.+?)\s+for\s+(\d+)\s+points?\s+of\s+[\w-]+\s+damage\s+by\s+/i
+  )
+  if (match && !/^you$/i.test(match[1])) {
+    return {
+      kind: 'actor-damage',
+      timestamp,
+      actor: cleanName(match[1]),
+      actorType: 'pet',
+      target: cleanName(match[2]),
+      damage: Number(match[3]),
+      source: 'spell'
+    }
+  }
+
+  match = line.match(
+    /\]\s+(.+?)\s+(?:hits|slashes|pierces|crushes|punches|kicks|bashes|cleaves|backstabs|reaves|mauls|bites|claws|strikes)\s+(.+?)\s+for\s+(\d+)\s+points?(?:\s+of\s+(?:[\w-]+\s+)?)?damage/i
+  )
+  if (match && !/^you$/i.test(match[1]) && !/^YOU$/i.test(match[2])) {
+    return {
+      kind: 'actor-damage',
+      timestamp,
+      actor: cleanName(match[1]),
+      actorType: 'pet',
+      target: cleanName(match[2]),
+      damage: Number(match[3]),
+      source: 'melee'
+    }
+  }
+
+  match = line.match(
+    /\]\s+(.+?)\s+is pierced by\s+(.+?)'s thorns for\s+(\d+)\s+points?\s+of non-melee damage/i
+  )
+  if (match && !/^YOUR$/i.test(match[2])) {
+    return {
+      kind: 'actor-damage',
+      timestamp,
+      actor: cleanName(match[2]),
+      actorType: 'pet',
+      target: cleanName(match[1]),
+      damage: Number(match[3]),
+      source: 'damage-shield'
+    }
+  }
+
+  match = line.match(
+    /\]\s+(.+?) tries to (?:hit|slash|pierce|crush|punch|kick|bash|cleave|backstab|reave|maul|bite|claw|strike)\s+(.+?),?\s+but (?:misses|.+?\s+(?:dodges|parries|blocks))/i
+  )
+  if (match && !/^you$/i.test(match[1]) && !/^YOU$/i.test(match[2])) {
+    return {
+      kind: 'actor-miss',
+      timestamp,
+      actor: cleanName(match[1]),
+      target: cleanName(match[2])
+    }
   }
 
   match = line.match(
@@ -116,9 +213,7 @@ export function parseCombatLine(line: string): CombatLogEvent | null {
   match = line.match(
     /\]\s+(.+?)\s+tries to .+? YOU,?\s+but (?:misses|YOU (?:dodge|parry|riposte|block))/i
   )
-  if (!match) {
-    match = line.match(/\]\s+(.+?)\s+misses YOU[.!]?$/i)
-  }
+  if (!match) match = line.match(/\]\s+(.+?)\s+misses YOU[.!]?$/i)
   if (match) {
     return {
       kind: 'incoming-miss',
@@ -127,11 +222,25 @@ export function parseCombatLine(line: string): CombatLogEvent | null {
     }
   }
 
-  match = line.match(/\]\s+(.+?) has been slain by YOU!/i)
-  if (!match) match = line.match(/\]\s+You have slain (.+?)[!.]?$/i)
+  match = line.match(/\]\s+(.+?) has been slain by (.+?)!/i)
+  if (match) {
+    return {
+      kind: 'kill',
+      timestamp,
+      target: cleanName(match[1]),
+      killer: cleanName(match[2])
+    }
+  }
+
+  match = line.match(/\]\s+You have slain (.+?)[!.]?$/i)
   if (!match) match = line.match(/\]\s+You have killed (.+?)[!.]?$/i)
   if (match) {
-    return { kind: 'kill', timestamp, target: cleanName(match[1]) }
+    return {
+      kind: 'kill',
+      timestamp,
+      target: cleanName(match[1]),
+      killer: 'You'
+    }
   }
 
   if (/\]\s+(?:You have been slain|You have died|You died)/i.test(line)) {

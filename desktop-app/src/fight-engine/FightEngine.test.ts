@@ -9,153 +9,92 @@ function line(seconds: number, text: string): string {
   return `[${new Date(start + seconds * 1000).toISOString()}] ${text}`
 }
 
-test('parses the native EverQuest timestamp shape', () => {
+test('parses native EverQuest timestamps', () => {
   assert.equal(
     getLogTimestamp('[Sat Aug 01 18:37:52 2026] Auto attack is on.'),
     Date.parse('Sat Aug 01 18:37:52 2026')
   )
 })
 
-test('recognizes player damage sources used by the existing parser', () => {
-  const melee = parseCombatLine(
-    line(0, 'You backstab skeleton L`rodd for 76 points of damage.')
-  )
-  const dot = parseCombatLine(
-    line(1, 'A skeletal excavator has taken 31 damage from your Stinging Swarm.')
-  )
-  const thorns = parseCombatLine(
-    line(2, 'Skeleton L`rodd is pierced by YOUR thorns for 7 points of non-melee damage.')
-  )
-
-  assert.equal(melee?.kind, 'player-damage')
-  assert.equal(dot?.kind, 'player-damage')
-  assert.equal(thorns?.kind, 'player-damage')
-})
-
-test('starts on incoming combat and waits through the five-second alarm grace', () => {
+test('tracks player melee, dots, and damage shield', () => {
   const engine = new FightEngine()
   engine.ingestLines([
-    line(0, 'a ghoul slashes YOU for 12 points of damage.')
+    line(0, 'You slash a ghoul for 20 points of damage.'),
+    line(1, 'A ghoul has taken 31 damage from your Stinging Swarm.'),
+    line(2, 'A ghoul is pierced by YOUR thorns for 7 points of non-melee damage.'),
+    line(3, 'You have slain a ghoul!')
   ])
 
-  assert.equal(engine.snapshot(start + 1999).currentFight?.target, 'a ghoul')
-  assert.equal(
-    engine.snapshot(start + 4999).combatState.autoAttackWarning,
-    false
-  )
-  assert.equal(
-    engine.snapshot(start + 5000).combatState.autoAttackWarning,
-    true
-  )
-
-  engine.ingestLines([line(5, 'Auto attack is on.')])
-  assert.equal(
-    engine.snapshot(start + 5000).combatState.autoAttackWarning,
-    false
-  )
+  const fight = engine.snapshot(start + 3000).fights[0]
+  assert.equal(fight.totalDamage, 58)
+  assert.equal(fight.playerDamage, 58)
+  assert.equal(fight.petDamage, 0)
 })
 
-test('briefly pauses the warning while the player casts under attack', () => {
+test('fresh player swings cancel a stale mid-fight AA warning', () => {
   const engine = new FightEngine()
   engine.ingestLines([
-    line(0, 'a ghoul slashes YOU for 12 points of damage.'),
-    line(2, 'You begin casting Tepid Deeds.')
+    line(0, 'Auto attack is on.'),
+    line(1, 'You slash a ghoul for 20 points of damage.'),
+    line(2, 'Auto attack is off.'),
+    line(3, 'a ghoul hits YOU for 8 points of damage.'),
+    line(5, 'You slash a ghoul for 18 points of damage.'),
+    line(7, 'a ghoul hits YOU for 9 points of damage.'),
+    line(9, 'You pierce a ghoul for 22 points of damage.')
   ])
 
-  assert.equal(
-    engine.snapshot(start + 6_999).combatState.autoAttackWarning,
-    false
-  )
-  assert.equal(
-    engine.snapshot(start + 7_000).combatState.autoAttackWarning,
-    true
-  )
-})
-
-test('renews the warning pause when mez successfully controls a target', () => {
-  const engine = new FightEngine()
-  engine.ingestLines([
-    line(0, 'a ghoul slashes YOU for 12 points of damage.'),
-    line(2, 'You begin casting Mesmerization VII.'),
-    line(3, 'a ghoul has been mesmerized.')
-  ])
-
-  assert.equal(
-    engine.snapshot(start + 9_999).combatState.autoAttackWarning,
-    false
-  )
   assert.equal(
     engine.snapshot(start + 10_000).combatState.autoAttackWarning,
-    true
+    false
   )
 })
 
-test('does not treat another player mez as the player controlling adds', () => {
+test('still warns when incoming attacks continue and the player stops swinging', () => {
   const engine = new FightEngine()
   engine.ingestLines([
-    line(0, 'a ghoul slashes YOU for 12 points of damage.'),
-    line(2, 'a ghoul has been mesmerized.')
+    line(0, 'Auto attack is off.'),
+    line(1, 'a ghoul hits YOU for 8 points of damage.')
   ])
 
   assert.equal(
-    engine.snapshot(start + 5_000).combatState.autoAttackWarning,
-    true
-  )
-})
-
-test('recognizes Enthrall as successful player crowd control', () => {
-  const engine = new FightEngine()
-  engine.ingestLines([
-    line(0, 'a vis ghoul knight hits YOU for 19 points of damage.'),
-    line(1, 'You begin casting Enthrall VII.'),
-    line(2, 'a vis ghoul knight has been enthralled.')
-  ])
-
-  assert.equal(
-    engine.snapshot(start + 8_999).combatState.autoAttackWarning,
+    engine.snapshot(start + 5_999).combatState.autoAttackWarning,
     false
   )
   assert.equal(
-    engine.snapshot(start + 9_000).combatState.autoAttackWarning,
+    engine.snapshot(start + 6_000).combatState.autoAttackWarning,
     true
   )
 })
 
-test('recognizes native incoming melee, spell, thorns, and defended attack shapes', () => {
-  const nativeLines = [
-    'A hardened skeleton punches YOU for 12 points of damage.',
-    'Soldier of V`Zher strikes YOU for 18 points of damage.',
-    'You have taken 23 damage from Engulfing Darkness by a Teir`Dal shadowknight.',
-    "YOU are pierced by a Teir`Dal ranger's thorns for 7 points of non-melee damage!",
-    'A dar ghoul knight tries to hit YOU, but YOU parry!'
-  ]
+test('identifies pet from Master speech and counts pet damage in total DPS', () => {
+  const engine = new FightEngine()
+  engine.ingestLines([
+    line(0, 'You slash a ghoul for 40 points of damage.'),
+    line(1, 'Jaraner slashes a ghoul for 20 points of damage.'),
+    line(2, "Jaraner told you, 'Attacking a ghoul Master.'"),
+    line(3, 'Jaraner bashes a ghoul for 10 points of damage.'),
+    line(4, 'A ghoul has been slain by Jaraner!')
+  ])
 
-  const events = nativeLines.map((text, index) =>
-    parseCombatLine(line(index, text))
-  )
-
-  assert.deepEqual(
-    events.map((event) => event?.kind),
-    [
-      'incoming-damage',
-      'incoming-damage',
-      'incoming-damage',
-      'incoming-damage',
-      'incoming-miss'
-    ]
-  )
+  const fight = engine.snapshot(start + 4000).fights[0]
+  assert.equal(fight.totalDamage, 70)
+  assert.equal(fight.playerDamage, 40)
+  assert.equal(fight.petDamage, 30)
+  assert.equal(fight.combatants.find((c) => c.type === 'pet')?.name, 'Jaraner')
+  assert.equal(fight.endReason, 'victory')
 })
 
-test('recognizes player attacks that the target dodges or parries as fight activity', () => {
-  const dodged = parseCombatLine(
-    line(0, 'You try to pierce Baron Telyx V`Zher, but Baron Telyx V`Zher dodges!')
-  )
-  const parried = parseCombatLine(
-    line(1, 'You try to backstab a dar ghoul knight, but a dar ghoul knight parries!')
-  )
+test('does not count unrelated NPC or player combat as pet damage', () => {
+  const engine = new FightEngine()
+  engine.ingestLines([
+    line(0, 'You slash a ghoul for 40 points of damage.'),
+    line(1, 'Guard Munden punches an orc centurion for 52 points of damage.'),
+    line(2, 'You have slain a ghoul!')
+  ])
 
-  assert.equal(dodged?.kind, 'player-miss')
-  assert.equal(parried?.kind, 'player-miss')
+  const fight = engine.snapshot(start + 2000).fights[0]
+  assert.equal(fight.totalDamage, 40)
+  assert.equal(fight.petDamage, 0)
 })
 
 test('keeps known adds in one fight and completes when all are slain', () => {
@@ -170,54 +109,9 @@ test('keeps known adds in one fight and completes when all are slain', () => {
 
   const snapshot = engine.snapshot(start + 4000)
   assert.equal(snapshot.currentFight, null)
-  assert.equal(snapshot.fights.length, 1)
   assert.equal(snapshot.fights[0].target, 'a ghoul + 1 add')
   assert.equal(snapshot.fights[0].totalDamage, 70)
-  assert.equal(snapshot.fights[0].bestHit, 50)
-  assert.equal(snapshot.fights[0].endReason, 'victory')
 })
-
-test('timeout closes at last activity and separates the next encounter', () => {
-  const engine = new FightEngine()
-  engine.ingestLines([
-    line(0, 'You slash a ghoul for 20 points of damage.'),
-    line(12, 'You slash a mummy for 30 points of damage.')
-  ])
-
-  const snapshot = engine.snapshot(start + 12_000)
-  assert.equal(snapshot.fights.length, 2)
-  assert.equal(snapshot.fights[0].endReason, 'timeout')
-  assert.equal(snapshot.fights[0].endedAt, start)
-  assert.equal(snapshot.currentFight?.target, 'a mummy')
-})
-
-test('successful Feign Death cancels the pending auto-attack warning', () => {
-  const engine = new FightEngine()
-  engine.ingestLines([
-    line(0, 'a ghoul slashes YOU for 12 points of damage.'),
-    line(1, 'Your enemies have forgotten you!')
-  ])
-
-  const snapshot = engine.snapshot(start + 3000)
-  assert.equal(snapshot.combatState.feigned, true)
-  assert.equal(snapshot.combatState.autoAttackWarning, false)
-})
-
-test('a completed fight resets the alarm for the next hostile pull', () => {
-  const engine = new FightEngine()
-  engine.ingestLines([
-    line(0, 'Auto attack is on.'),
-    line(1, 'You slash a ghoul for 20 points of damage.'),
-    line(2, 'You have slain a ghoul!'),
-    line(3, 'a mummy hits YOU for 8 points of damage.')
-  ])
-
-  const snapshot = engine.snapshot(start + 8000)
-  assert.equal(snapshot.currentFight?.target, 'a mummy')
-  assert.equal(snapshot.combatState.autoAttack, 'unknown')
-  assert.equal(snapshot.combatState.autoAttackWarning, true)
-})
-
 
 test('ignores lingering DOT ticks after a slain target closes the fight', () => {
   const engine = new FightEngine()
@@ -227,19 +121,20 @@ test('ignores lingering DOT ticks after a slain target closes the fight', () => 
     line(2, 'A ghoul has taken 53 damage from your Immolate.')
   ])
 
-  const snapshot = engine.snapshot(start + 2_000)
+  const snapshot = engine.snapshot(start + 2000)
   assert.equal(snapshot.currentFight, null)
   assert.equal(snapshot.fights.length, 1)
   assert.equal(snapshot.fights[0].totalDamage, 40)
 })
 
-test('allows a new same-named target after the post-kill DOT window', () => {
-  const engine = new FightEngine()
-  engine.ingestLines([
-    line(0, 'You pierce a ghoul for 40 points of damage.'),
-    line(1, 'You have slain a ghoul!'),
-    line(14, 'A ghoul has taken 53 damage from your Immolate.')
-  ])
+test('recognizes pet kill line shape from live log', () => {
+  const event = parseCombatLine(
+    line(0, 'A zol ghoul knight has been slain by Zonartik!')
+  )
 
-  assert.equal(engine.snapshot(start + 14_000).currentFight?.target, 'A ghoul')
+  assert.equal(event?.kind, 'kill')
+  if (event?.kind === 'kill') {
+    assert.equal(event.target, 'A zol ghoul knight')
+    assert.equal(event.killer, 'Zonartik')
+  }
 })

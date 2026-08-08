@@ -19,11 +19,23 @@ export type DamageSource =
   | 'dot'
   | 'damage-shield'
 
+export type CombatantType = 'player' | 'pet'
+
 export type FightDamageEvent = {
   timestamp: number
   damage: number
   target: string
   source: DamageSource
+  actor: string
+  actorType: CombatantType
+}
+
+export type FightCombatantSnapshot = {
+  name: string
+  type: CombatantType
+  damage: number
+  dps: number
+  bestHit: number
 }
 
 export type FightSnapshot = {
@@ -32,6 +44,9 @@ export type FightSnapshot = {
   targets: string[]
   defeatedTargets: string[]
   totalDamage: number
+  playerDamage: number
+  petDamage: number
+  combatants: FightCombatantSnapshot[]
   fightDps: number
   rollingDps: number
   displayDps: number
@@ -49,6 +64,7 @@ export type FightSnapshot = {
 export type CombatState = {
   lastActivityAt: number
   lastIncomingAttackAt: number
+  lastPlayerAttackAt: number
   autoAttack: AutoAttackState
   feigned: boolean
   autoAttackWarningStartedAt: number | null

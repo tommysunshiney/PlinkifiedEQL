@@ -4,9 +4,9 @@ import {
   DEFAULT_AUTO_ATTACK_GRACE_MS,
   DEFAULT_CROWD_CONTROL_PAUSE_MS,
   DEFAULT_FIGHT_TIMEOUT_MS,
+  DEFAULT_POST_KILL_DOT_IGNORE_MS,
   DEFAULT_ROLLING_WINDOW_MS,
-  DEFAULT_SPELL_CAST_PAUSE_MS,
-  DEFAULT_POST_KILL_DOT_IGNORE_MS
+  DEFAULT_SPELL_CAST_PAUSE_MS
 } from './types.ts'
 import type {
   CombatState,
@@ -28,14 +28,17 @@ type MutableFight = {
   damageEvents: FightDamageEvent[]
 }
 
-function normalizeTarget(target: string): string {
-  return target.trim().toLocaleLowerCase()
+type PendingActorEvent = Extract<CombatLogEvent, { kind: 'actor-damage' | 'actor-miss' }>
+
+function normalizeName(value: string): string {
+  return value.trim().toLocaleLowerCase()
 }
 
 function emptyCombatState(): CombatState {
   return {
     lastActivityAt: 0,
     lastIncomingAttackAt: 0,
+    lastPlayerAttackAt: 0,
     autoAttack: 'unknown',
     feigned: false,
     autoAttackWarningStartedAt: null,
@@ -53,14 +56,13 @@ export class FightEngine {
   private combatState: CombatState = emptyCombatState()
   private lastPlayerSpellCastAt = 0
   private recentlyDefeatedTargets = new Map<string, number>()
+  private knownPets = new Map<string, string>()
+  private pendingActorEvents = new Map<string, PendingActorEvent[]>()
 
   constructor(options: FightEngineOptions = {}) {
-    this.fightTimeoutMs =
-      options.fightTimeoutMs ?? DEFAULT_FIGHT_TIMEOUT_MS
-    this.rollingWindowMs =
-      options.rollingWindowMs ?? DEFAULT_ROLLING_WINDOW_MS
-    this.autoAttackGraceMs =
-      options.autoAttackGraceMs ?? DEFAULT_AUTO_ATTACK_GRACE_MS
+    this.fightTimeoutMs = options.fightTimeoutMs ?? DEFAULT_FIGHT_TIMEOUT_MS
+    this.rollingWindowMs = options.rollingWindowMs ?? DEFAULT_ROLLING_WINDOW_MS
+    this.autoAttackGraceMs = options.autoAttackGraceMs ?? DEFAULT_AUTO_ATTACK_GRACE_MS
   }
 
   reset(): void {
@@ -69,6 +71,8 @@ export class FightEngine {
     this.combatState = emptyCombatState()
     this.lastPlayerSpellCastAt = 0
     this.recentlyDefeatedTargets.clear()
+    this.knownPets.clear()
+    this.pendingActorEvents.clear()
   }
 
   ingestLines(lines: string[]): void {
@@ -87,8 +91,7 @@ export class FightEngine {
     const active = this.currentFight
       ? this.createSnapshot(this.currentFight, clock)
       : null
-    const warningStartedAt =
-      this.combatState.autoAttackWarningStartedAt
+    const warningStartedAt = this.combatState.autoAttackWarningStartedAt
     const autoAttackWarning = Boolean(
       active &&
       warningStartedAt !== null &&
@@ -123,11 +126,24 @@ export class FightEngine {
         this.recordActivity(event.timestamp, event.target)
         this.currentFight?.damageEvents.push(event)
         this.combatState.feigned = false
+        if (event.source === 'melee') {
+          this.notePlayerAttackEvidence(event.timestamp)
+        }
         return
 
       case 'player-miss':
         this.recordActivity(event.timestamp, event.target)
         this.combatState.feigned = false
+        this.notePlayerAttackEvidence(event.timestamp)
+        return
+
+      case 'actor-damage':
+      case 'actor-miss':
+        this.acceptOrQueueActorEvent(event)
+        return
+
+      case 'pet-identity':
+        this.confirmPet(event.pet)
         return
 
       case 'incoming-damage':
@@ -160,9 +176,7 @@ export class FightEngine {
 
       case 'player-spell-cast':
         this.lastPlayerSpellCastAt = event.timestamp
-        this.pauseAutoAttackWarning(
-          event.timestamp + DEFAULT_SPELL_CAST_PAUSE_MS
-        )
+        this.pauseAutoAttackWarning(event.timestamp + DEFAULT_SPELL_CAST_PAUSE_MS)
         return
 
       case 'crowd-control':
@@ -170,14 +184,18 @@ export class FightEngine {
           event.timestamp - this.lastPlayerSpellCastAt <=
           DEFAULT_SPELL_CAST_PAUSE_MS
         ) {
-          this.pauseAutoAttackWarning(
-            event.timestamp + DEFAULT_CROWD_CONTROL_PAUSE_MS
-          )
+          this.pauseAutoAttackWarning(event.timestamp + DEFAULT_CROWD_CONTROL_PAUSE_MS)
         }
         return
 
       case 'kill':
-        this.recordKill(event.timestamp, event.target)
+        if (
+          event.killer === null ||
+          /^you$/i.test(event.killer) ||
+          this.isKnownPet(event.killer)
+        ) {
+          this.recordKill(event.timestamp, event.target)
+        }
         return
 
       case 'death':
@@ -192,6 +210,57 @@ export class FightEngine {
     }
   }
 
+  private notePlayerAttackEvidence(timestamp: number): void {
+    this.combatState.lastPlayerAttackAt = timestamp
+    // Fresh swing/miss evidence means PEQL must not keep screaming based on an
+    // older "Auto attack is off" line. If AA really is off, the next incoming
+    // attack starts a new grace period and the horn can still fire.
+    this.combatState.autoAttackWarningStartedAt = null
+  }
+
+  private acceptOrQueueActorEvent(event: PendingActorEvent): void {
+    if (this.isKnownPet(event.actor)) {
+      this.recordPetEvent(event)
+      return
+    }
+
+    const key = normalizeName(event.actor)
+    const queued = this.pendingActorEvents.get(key) ?? []
+    queued.push(event)
+    this.pendingActorEvents.set(
+      key,
+      queued.filter((item) => event.timestamp - item.timestamp <= 30_000)
+    )
+  }
+
+  private confirmPet(pet: string): void {
+    const key = normalizeName(pet)
+    this.knownPets.set(key, pet)
+
+    const pending = this.pendingActorEvents.get(key) ?? []
+    for (const event of pending) this.recordPetEvent(event)
+    this.pendingActorEvents.delete(key)
+  }
+
+  private isKnownPet(name: string): boolean {
+    return this.knownPets.has(normalizeName(name))
+  }
+
+  private recordPetEvent(event: PendingActorEvent): void {
+    this.recordActivity(event.timestamp, event.target)
+
+    if (event.kind === 'actor-damage') {
+      this.currentFight?.damageEvents.push({
+        timestamp: event.timestamp,
+        target: event.target,
+        damage: event.damage,
+        source: event.source,
+        actor: this.knownPets.get(normalizeName(event.actor)) ?? event.actor,
+        actorType: 'pet'
+      })
+    }
+  }
+
   private pauseAutoAttackWarning(until: number): void {
     this.combatState.autoAttackWarningPausedUntil = Math.max(
       this.combatState.autoAttackWarningPausedUntil,
@@ -202,7 +271,7 @@ export class FightEngine {
   private recordActivity(timestamp: number, target: string): void {
     if (!this.currentFight) {
       this.currentFight = {
-        id: `${timestamp}-${normalizeTarget(target)}`,
+        id: `${timestamp}-${normalizeName(target)}`,
         startedAt: timestamp,
         lastActivityAt: timestamp,
         endedAt: null,
@@ -213,20 +282,17 @@ export class FightEngine {
       }
     }
 
-    const normalizedTarget = normalizeTarget(target)
+    const normalizedTarget = normalizeName(target)
     this.currentFight.targets.set(
       normalizedTarget,
       this.currentFight.targets.get(normalizedTarget) ?? target
     )
-    this.currentFight.lastActivityAt = Math.max(
-      this.currentFight.lastActivityAt,
-      timestamp
-    )
+    this.currentFight.lastActivityAt = Math.max(this.currentFight.lastActivityAt, timestamp)
     this.combatState.lastActivityAt = timestamp
   }
 
   private recordKill(timestamp: number, target: string): void {
-    const normalizedTarget = normalizeTarget(target)
+    const normalizedTarget = normalizeName(target)
     this.recentlyDefeatedTargets.set(normalizedTarget, timestamp)
 
     if (!this.currentFight) return
@@ -235,25 +301,18 @@ export class FightEngine {
       this.currentFight.targets.get(normalizedTarget) ?? target
     )
     this.currentFight.defeatedTargets.add(normalizedTarget)
-    this.currentFight.lastActivityAt = Math.max(
-      this.currentFight.lastActivityAt,
-      timestamp
-    )
+    this.currentFight.lastActivityAt = Math.max(this.currentFight.lastActivityAt, timestamp)
     this.combatState.lastActivityAt = timestamp
 
-    const everyKnownTargetDefeated = Array.from(
-      this.currentFight.targets.keys()
-    ).every((knownTarget) =>
-      this.currentFight?.defeatedTargets.has(knownTarget)
+    const everyKnownTargetDefeated = Array.from(this.currentFight.targets.keys()).every(
+      (knownTarget) => this.currentFight?.defeatedTargets.has(knownTarget)
     )
 
-    if (everyKnownTargetDefeated) {
-      this.finishCurrentFight(timestamp, 'victory')
-    }
+    if (everyKnownTargetDefeated) this.finishCurrentFight(timestamp, 'victory')
   }
 
   private wasRecentlyDefeated(target: string, timestamp: number): boolean {
-    const normalizedTarget = normalizeTarget(target)
+    const normalizedTarget = normalizeName(target)
     const defeatedAt = this.recentlyDefeatedTargets.get(normalizedTarget)
 
     if (defeatedAt === undefined) return false
@@ -271,22 +330,13 @@ export class FightEngine {
       this.currentFight &&
       clock - this.currentFight.lastActivityAt > this.fightTimeoutMs
     ) {
-      this.finishCurrentFight(
-        this.currentFight.lastActivityAt,
-        'timeout'
-      )
+      this.finishCurrentFight(this.currentFight.lastActivityAt, 'timeout')
     }
   }
 
-  private finishCurrentFight(
-    timestamp: number,
-    reason: FightEndReason
-  ): void {
+  private finishCurrentFight(timestamp: number, reason: FightEndReason): void {
     if (this.currentFight) {
-      this.currentFight.endedAt = Math.max(
-        timestamp,
-        this.currentFight.lastActivityAt
-      )
+      this.currentFight.endedAt = Math.max(timestamp, this.currentFight.lastActivityAt)
       this.currentFight.endReason = reason
       this.completedFights.push(this.currentFight)
       this.currentFight = null
@@ -298,33 +348,55 @@ export class FightEngine {
     this.combatState.feigned = false
   }
 
-  private createSnapshot(
-    fight: MutableFight,
-    clock: number
-  ): FightSnapshot {
-    const firstDamageAt = fight.damageEvents[0]?.timestamp ?? null
-    const lastDamageAt =
-      fight.damageEvents[fight.damageEvents.length - 1]?.timestamp ?? null
+  private createSnapshot(fight: MutableFight, clock: number): FightSnapshot {
+    const damageEvents = [...fight.damageEvents].sort((a, b) => a.timestamp - b.timestamp)
+    const firstDamageAt = damageEvents[0]?.timestamp ?? null
+    const lastDamageAt = damageEvents[damageEvents.length - 1]?.timestamp ?? null
     const dpsStartAt = firstDamageAt ?? fight.startedAt
     const effectiveEndAt = Math.max(dpsStartAt + 1000, clock)
     const durationSeconds = (effectiveEndAt - dpsStartAt) / 1000
-    const totalDamage = fight.damageEvents.reduce(
-      (total, event) => total + event.damage,
-      0
-    )
+    const totalDamage = damageEvents.reduce((total, event) => total + event.damage, 0)
+    const playerDamage = damageEvents
+      .filter((event) => event.actorType === 'player')
+      .reduce((total, event) => total + event.damage, 0)
+    const petDamage = damageEvents
+      .filter((event) => event.actorType === 'pet')
+      .reduce((total, event) => total + event.damage, 0)
     const rollingStart = clock - this.rollingWindowMs
-    const rollingDamage = fight.damageEvents
+    const rollingDamage = damageEvents
       .filter((event) => event.timestamp >= rollingStart)
       .reduce((total, event) => total + event.damage, 0)
     const rollingDps = rollingDamage / (this.rollingWindowMs / 1000)
     const targets = Array.from(fight.targets.values())
-    const defeatedTargets = Array.from(fight.defeatedTargets)
-      .map((target) => fight.targets.get(target) ?? target)
+    const defeatedTargets = Array.from(fight.defeatedTargets).map(
+      (target) => fight.targets.get(target) ?? target
+    )
     const target = targets.length <= 1
       ? targets[0] ?? 'Unknown target'
       : `${targets[0]} + ${targets.length - 1} add${targets.length === 2 ? '' : 's'}`
     const fightDps = totalDamage / durationSeconds
     const active = fight.endedAt === null
+
+    const combatantMap = new Map<string, { name: string; type: 'player' | 'pet'; damage: number; bestHit: number }>()
+    for (const event of damageEvents) {
+      const key = `${event.actorType}:${normalizeName(event.actor)}`
+      const current = combatantMap.get(key) ?? {
+        name: event.actor,
+        type: event.actorType,
+        damage: 0,
+        bestHit: 0
+      }
+      current.damage += event.damage
+      current.bestHit = Math.max(current.bestHit, event.damage)
+      combatantMap.set(key, current)
+    }
+
+    const combatants = Array.from(combatantMap.values())
+      .map((combatant) => ({
+        ...combatant,
+        dps: combatant.damage / durationSeconds
+      }))
+      .sort((a, b) => b.damage - a.damage)
 
     return {
       id: fight.id,
@@ -332,13 +404,13 @@ export class FightEngine {
       targets,
       defeatedTargets,
       totalDamage,
+      playerDamage,
+      petDamage,
+      combatants,
       fightDps,
       rollingDps,
       displayDps: active ? rollingDps : fightDps,
-      bestHit: fight.damageEvents.reduce(
-        (best, event) => Math.max(best, event.damage),
-        0
-      ),
+      bestHit: damageEvents.reduce((best, event) => Math.max(best, event.damage), 0),
       durationSeconds,
       startedAt: fight.startedAt,
       firstDamageAt,
