@@ -3,8 +3,12 @@
 import type {
   BossRecord,
   DatabaseStatus,
+  EncounterInput,
+  EncounterRecord,
   JournalEntryInput,
-  JournalRecord
+  JournalRecord,
+  PlayerNoteInput,
+  PlayerNoteRecord
 } from './types/database'
 
 declare global {
@@ -17,6 +21,18 @@ declare global {
         entries: JournalEntryInput[]
       ) => Promise<number>
       listJournalEntries: (limit?: number) => Promise<JournalRecord[]>
+      savePlayerNote: (
+        input: PlayerNoteInput
+      ) => Promise<PlayerNoteRecord>
+      listPlayerNotes: (
+        limit?: number
+      ) => Promise<PlayerNoteRecord[]>
+      saveEncounters: (
+        logFilePath: string,
+        encounters: EncounterInput[],
+        mode?: 'live' | 'replay'
+      ) => Promise<number>
+      listEncounters: (limit?: number) => Promise<EncounterRecord[]>
       openExternal: (url: string) => Promise<void>
       selectLogFile: () => Promise<string | null>
       readLogFile: (filePath: string) => Promise<string[]>

@@ -1,5 +1,10 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { JournalEntryInput } from './database/types'
+import type {
+  EncounterInput,
+  JournalEntryInput,
+  PlayerNoteInput,
+  PlayerNoteRecord
+} from './database/types'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getDatabaseStatus: () => ipcRenderer.invoke('database:status'),
@@ -15,6 +20,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   listJournalEntries: (limit?: number) =>
     ipcRenderer.invoke('journal:list', limit),
+
+  savePlayerNote: (
+    input: PlayerNoteInput
+  ): Promise<PlayerNoteRecord> =>
+    ipcRenderer.invoke('player-notes:save', input),
+
+  listPlayerNotes: (
+    limit?: number
+  ): Promise<PlayerNoteRecord[]> =>
+    ipcRenderer.invoke('player-notes:list', limit),
+
+  saveEncounters: (
+    logFilePath: string,
+    encounters: EncounterInput[],
+    mode: 'live' | 'replay' = 'live'
+  ): Promise<number> =>
+    ipcRenderer.invoke('encounters:save', logFilePath, encounters, mode),
+
+  listEncounters: (limit?: number) =>
+    ipcRenderer.invoke('encounters:list', limit),
 
   openExternal: (url: string): Promise<void> =>
     ipcRenderer.invoke('external:open', url),
@@ -33,7 +58,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   onLogLines: (callback: (lines: string[]) => void): void => {
     ipcRenderer.removeAllListeners('log:newLines')
-
     ipcRenderer.on('log:newLines', (_event, lines: string[]) => {
       callback(lines)
     })

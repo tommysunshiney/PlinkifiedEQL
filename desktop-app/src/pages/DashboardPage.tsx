@@ -1,4 +1,4 @@
-import {
+﻿import {
   useEffect,
   useMemo,
   useRef,
@@ -8,6 +8,7 @@ import type { ChangeEvent } from 'react'
 import '../App.css'
 import { EventType, parseLine } from '../parser'
 import { useSession } from '../session/SessionContext'
+import { QuickPlayerNote } from '../journal/QuickPlayerNote'
 import autoAttackFartUrl from '../assets/auto-attack-fart.mp3'
 
 const categoryLabels: Record<EventType, string> = {
@@ -134,6 +135,19 @@ export default function DashboardPage() {
     ).length,
     [sessionLines]
   )
+  const latestZoneName = useMemo(() => {
+    for (let index = sessionLines.length - 1; index >= 0; index -= 1) {
+      const line = sessionLines[index]
+      const match =
+        line.match(/\]\s+You have entered (.+?) \d+ \(.+?\)\.?$/i) ??
+        line.match(/\]\s+You have entered (.+?) - Solo\.?$/i) ??
+        line.match(/\]\s+You have entered (.+?)\.?$/i)
+
+      if (match) return match[1].trim().replace(/\.$/, '')
+    }
+
+    return null
+  }, [sessionLines])
 
   const fightHistory = fightState.fights
   const newestFight = fightState.currentFight ?? fightHistory[fightHistory.length - 1] ?? null
@@ -240,7 +254,7 @@ export default function DashboardPage() {
       const result = await markOhShit()
       const markerTime = result.marker.match(/(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/)?.[1]
       setOhShitStatus('success')
-      setOhShitToast(markerTime ? `OH SHIT marker added · ${markerTime}` : 'OH SHIT marker added')
+      setOhShitToast(markerTime ? `OH SHIT marker added Â· ${markerTime}` : 'OH SHIT marker added')
       ohShitResetTimerRef.current = window.setTimeout(() => {
         setOhShitStatus('idle')
         setOhShitToast('')
@@ -325,7 +339,7 @@ export default function DashboardPage() {
 
         {autoAttackWarning && (
           <div className="autoattack-warning" role="alert">
-            ⚠ AUTO ATTACK IS NOT ON — SWING, PECK!
+            âš  AUTO ATTACK IS NOT ON â€” SWING, PECK!
           </div>
         )}
 
@@ -375,9 +389,9 @@ export default function DashboardPage() {
             {ohShitStatus === 'saving'
               ? 'MARKING...'
               : ohShitStatus === 'success'
-                ? '✓ MARKED!'
+                ? 'âœ“ MARKED!'
                 : ohShitStatus === 'error'
-                  ? '✕ TRY AGAIN'
+                  ? 'âœ• TRY AGAIN'
                   : 'OH SHIT!'}
           </button>
         </div>
@@ -386,7 +400,7 @@ export default function DashboardPage() {
           <div className={`peql-toast toast-${ohShitStatus}`} role="status" aria-live="polite">
             <strong>
               {ohShitStatus === 'success'
-                ? '🚨 Combat bookmark recorded'
+                ? 'ðŸš¨ Combat bookmark recorded'
                 : ohShitStatus === 'error'
                   ? 'Marker failed'
                   : 'Recording marker'}
@@ -395,13 +409,22 @@ export default function DashboardPage() {
           </div>
         )}
 
+        <QuickPlayerNote
+          selectedLog={selectedLog}
+          zoneName={latestZoneName}
+          activeEncounterId={fightState.currentFight?.id}
+          activeEncounterTarget={fightState.currentFight?.target}
+          onSaved={() => {
+            // Adventure Journal reads persisted notes from SQLite.
+          }}
+        />
         <div className="selected-file-line">
           <strong>Log:</strong>
           <span title={selectedLog || undefined}>
             {selectedLog ? selectedLog.split(/[\\/]/).pop() : 'No log file selected.'}
           </span>
           <span className="log-line-counts">
-            {logLines.length.toLocaleString()} total · {sessionLines.length.toLocaleString()} this sesh
+            {logLines.length.toLocaleString()} total Â· {sessionLines.length.toLocaleString()} this sesh
           </span>
           <span className="alarm-sound-name" title={alarmSoundName}>
             Alarm: {alarmEnabled ? alarmSoundName : 'OFF'}
@@ -428,13 +451,13 @@ export default function DashboardPage() {
               disabled={!canGoOlder}
               title="Previous fight"
               style={{ minWidth: '44px', opacity: canGoOlder ? 1 : 0.45 }}
-            >◀</button>
+            >â—€</button>
 
             <strong style={{ textAlign: 'center', flex: 1 }}>
               {fightHistory.length === 0
                 ? 'No fights recorded'
                 : isViewingLive
-                  ? `Live · Fight ${displayedFightNumber} of ${fightHistory.length}`
+                  ? `Live Â· Fight ${displayedFightNumber} of ${fightHistory.length}`
                   : `Fight ${displayedFightNumber} of ${fightHistory.length}`}
             </strong>
 
@@ -444,7 +467,7 @@ export default function DashboardPage() {
               disabled={!canGoNewer}
               title="Next fight"
               style={{ minWidth: '44px', opacity: canGoNewer ? 1 : 0.45 }}
-            >▶</button>
+            >â–¶</button>
           </div>
 
           <div className="dps-heading">
@@ -452,7 +475,7 @@ export default function DashboardPage() {
               <span className="dps-label">
                 {isViewingLive ? 'CURRENT FIGHT' : 'FIGHT HISTORY'}
                 {displayedFight?.target && (
-                  <strong className="fight-target"> · {displayedFight.target}</strong>
+                  <strong className="fight-target"> Â· {displayedFight.target}</strong>
                 )}
               </span>
               <strong className="dps-value">
@@ -504,3 +527,4 @@ export default function DashboardPage() {
     </div>
   )
 }
+

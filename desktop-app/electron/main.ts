@@ -7,11 +7,19 @@ import {
   closeDatabase,
   getDatabaseStatus,
   initializeDatabase,
+  listEncounters,
   listJournalEntries,
+  saveEncounters,
   saveJournalEntries,
-  searchBosses
+  searchBosses,
+  listPlayerNotes,
+  savePlayerNote
 } from './database/database'
-import type { JournalEntryInput } from './database/types'
+import type {
+  EncounterInput,
+  JournalEntryInput,
+  PlayerNoteInput
+} from './database/types'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -40,19 +48,16 @@ function formatSessionTimestamp(date: Date): string {
 
 function createSessionMarker(): string {
   const timestamp = formatSessionTimestamp(new Date())
-
   return `===== PEQL SESSION START :: ${timestamp} =====`
 }
 
 function createOhShitMarker(): string {
   const timestamp = formatSessionTimestamp(new Date())
-
   return `===== PEQL OH SHIT! :: ${timestamp} =====`
 }
 
 function createFartMarker(): string {
   const timestamp = formatSessionTimestamp(new Date())
-
   return `===== PEQL ==FART== :: ${timestamp} =====`
 }
 
@@ -74,12 +79,36 @@ ipcMain.handle(
   (_, limit?: number) => listJournalEntries(limit)
 )
 
+ipcMain.handle(
+  'player-notes:save',
+  (_, input: PlayerNoteInput) => savePlayerNote(input)
+)
+
+ipcMain.handle(
+  'player-notes:list',
+  (_, limit?: number) => listPlayerNotes(limit)
+)
+
+ipcMain.handle(
+  'encounters:save',
+  (
+    _,
+    logFilePath: string,
+    encounters: EncounterInput[],
+    mode?: 'live' | 'replay'
+  ) => saveEncounters(logFilePath, encounters, mode)
+)
+
+ipcMain.handle(
+  'encounters:list',
+  (_, limit?: number) => listEncounters(limit)
+)
+
 ipcMain.handle('external:open', async (_, url: string) => {
   const parsed = new URL(url)
   if (parsed.protocol !== 'https:' || parsed.hostname !== 'eqlwiki.com') {
     throw new Error('Only EQL Wiki links may be opened from PEQL.')
   }
-
   await shell.openExternal(parsed.toString())
 })
 
@@ -93,64 +122,36 @@ ipcMain.handle('dialog:openLogFile', async () => {
     ],
   })
 
-  if (result.canceled || result.filePaths.length === 0) {
-    return null
-  }
-
+  if (result.canceled || result.filePaths.length === 0) return null
   return result.filePaths[0]
 })
 
 ipcMain.handle('log:read', async (_, filePath: string) => {
   const text = await fs.readFile(filePath, 'utf8')
-
   return text
     .split(/\r?\n/)
     .filter((line) => line.trim().length > 0)
 })
 
 ipcMain.handle('log:newSession', async (_, filePath: string) => {
-  if (!filePath) {
-    throw new Error('No log file selected.')
-  }
-
+  if (!filePath) throw new Error('No log file selected.')
   const marker = createSessionMarker()
-
   await fs.appendFile(filePath, `\r\n${marker}\r\n`, 'utf8')
-
-  return {
-    success: true,
-    marker,
-  }
+  return { success: true, marker }
 })
 
 ipcMain.handle('log:ohShit', async (_, filePath: string) => {
-  if (!filePath) {
-    throw new Error('No log file selected.')
-  }
-
+  if (!filePath) throw new Error('No log file selected.')
   const marker = createOhShitMarker()
-
   await fs.appendFile(filePath, `\r\n${marker}\r\n`, 'utf8')
-
-  return {
-    success: true,
-    marker,
-  }
+  return { success: true, marker }
 })
 
 ipcMain.handle('log:fart', async (_, filePath: string) => {
-  if (!filePath) {
-    throw new Error('No log file selected.')
-  }
-
+  if (!filePath) throw new Error('No log file selected.')
   const marker = createFartMarker()
-
   await fs.appendFile(filePath, `\r\n${marker}\r\n`, 'utf8')
-
-  return {
-    success: true,
-    marker,
-  }
+  return { success: true, marker }
 })
 
 function createWindow() {
@@ -197,12 +198,9 @@ let watchedLogSize = 0
 let unfinishedLine = ''
 
 ipcMain.handle('log:startWatch', async (event, filePath: string) => {
-  if (watchedLogPath) {
-    unwatchFile(watchedLogPath)
-  }
+  if (watchedLogPath) unwatchFile(watchedLogPath)
 
   const stats = await fs.stat(filePath)
-
   watchedLogPath = filePath
   watchedLogSize = stats.size
   unfinishedLine = ''
@@ -215,9 +213,7 @@ ipcMain.handle('log:startWatch', async (event, filePath: string) => {
         return
       }
 
-      if (currentStats.size === watchedLogSize) {
-        return
-      }
+      if (currentStats.size === watchedLogSize) return
 
       const bytesToRead = currentStats.size - watchedLogSize
       const file = await fs.open(filePath, 'r')
@@ -230,7 +226,6 @@ ipcMain.handle('log:startWatch', async (event, filePath: string) => {
 
       const text = unfinishedLine + buffer.toString('utf8')
       const lines = text.split(/\r?\n/)
-
       unfinishedLine = lines.pop() ?? ''
 
       const completedLines = lines.filter(
@@ -247,9 +242,7 @@ ipcMain.handle('log:startWatch', async (event, filePath: string) => {
 })
 
 ipcMain.handle('log:stopWatch', () => {
-  if (watchedLogPath) {
-    unwatchFile(watchedLogPath)
-  }
+  if (watchedLogPath) unwatchFile(watchedLogPath)
 
   watchedLogPath = null
   watchedLogSize = 0

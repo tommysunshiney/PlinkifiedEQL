@@ -4,6 +4,7 @@ export type DatabaseStatus = {
   schemaVersion: number
   bossCount: number
   journalCount: number
+  encounterCount: number
 }
 
 export type BossRecord = {
@@ -37,4 +38,98 @@ export type JournalRecord = {
   narrative: string
   zoneName: string | null
   metadata: Record<string, unknown>
+}
+
+export type EncounterAction = {
+  offsetMs: number
+  kind:
+    | 'spell'
+    | 'ability'
+    | 'auto-attack'
+    | 'special-attack'
+    | 'death'
+    | 'enemy-cast'
+    | 'enemy-interrupt'
+    | 'enemy-heal'
+    | 'crowd-control'
+    | 'crowd-control-end'
+    | 'player-interrupt'
+  name: string
+}
+
+
+export type EncounterBurnSegment = {
+  startedOffsetMs: number
+  endedOffsetMs: number
+  durationMs: number
+  damage: number
+}
+
+export type EncounterMobBreakdown = {
+  name: string
+  joinedOffsetMs: number
+  burnStartedOffsetMs: number | null
+  burnDurationMs: number
+  burnSegments: EncounterBurnSegment[]
+  activeDamage: number
+  elapsedTtkMs: number
+  killedOffsetMs: number | null
+  totalDamage: number
+  playerDamage: number
+  petDamage: number
+  dps: number
+  bestHit: number
+  defeated: boolean
+  joinedLater: boolean
+}
+
+export type EncounterInput = {
+  sourceKey: string
+  encounterTitle: string
+  primaryNpcName: string
+  targetNames?: string[]
+  mobs: EncounterMobBreakdown[]
+  zoneName?: string
+  zoneDetail?: string
+  startedAt: string
+  endedAt: string
+  durationMs: number
+  totalDamage: number
+  playerDamage: number
+  petDamage: number
+  dps: number
+  bestHit: number
+  mobKillCount: number
+  endReason: string
+  outcome: 'victory' | 'failed'
+  actions: EncounterAction[]
+}
+
+export type EncounterRecord = EncounterInput & {
+  id: number
+  sessionId: number
+  attemptNumber: number
+  namedMobId: number | null
+  namedTitle: string | null
+  wikiUrl: string | null
+}
+
+
+export type PlayerNoteInput = {
+  logFilePath: string
+  createdAt: string
+  zoneName?: string
+  noteText: string
+  encounterSourceKey?: string
+}
+
+export type PlayerNoteRecord = {
+  id: number
+  sessionId: number
+  encounterSourceKey: string | null
+  createdAt: string
+  zoneName: string | null
+  noteText: string
+  encounterTitle: string | null
+  primaryNpcName: string | null
 }

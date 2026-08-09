@@ -1,10 +1,12 @@
-export const DEFAULT_FIGHT_TIMEOUT_MS = 10_000
+export const DEFAULT_FIGHT_TIMEOUT_MS = 30_000
+export const DEFAULT_CONTROLLED_FIGHT_TIMEOUT_MS = 120_000
 export const DEFAULT_ROLLING_WINDOW_MS = 10_000
 export const DEFAULT_AUTO_ATTACK_GRACE_MS = 5_000
 export const DEFAULT_SPELL_CAST_PAUSE_MS = 5_000
 export const DEFAULT_CROWD_CONTROL_PAUSE_MS = 7_000
 export const DEFAULT_POST_KILL_DOT_IGNORE_MS = 12_000
 export const DEFAULT_POST_KILL_COMBAT_IGNORE_MS = 3_000
+export const DEFAULT_MOB_BURN_GAP_MS = 12_000
 
 export type FightEndReason =
   | 'victory'
@@ -39,6 +41,35 @@ export type FightCombatantSnapshot = {
   bestHit: number
 }
 
+export type FightBurnSegment = {
+  startedAt: number
+  endedAt: number
+  durationSeconds: number
+  damage: number
+}
+
+export type FightMobSnapshot = {
+  name: string
+  joinedAt: number
+  joinedOffsetMs: number
+  firstDamageAt: number | null
+  lastDamageAt: number | null
+  killedAt: number | null
+  burnStartedAt: number | null
+  burnEndedAt: number | null
+  burnDurationSeconds: number
+  burnSegments: FightBurnSegment[]
+  activeDamage: number
+  elapsedTtkSeconds: number
+  totalDamage: number
+  playerDamage: number
+  petDamage: number
+  dps: number
+  bestHit: number
+  defeated: boolean
+  joinedLater: boolean
+}
+
 export type FightSnapshot = {
   id: string
   target: string
@@ -48,6 +79,7 @@ export type FightSnapshot = {
   playerDamage: number
   petDamage: number
   combatants: FightCombatantSnapshot[]
+  mobs: FightMobSnapshot[]
   fightDps: number
   rollingDps: number
   displayDps: number

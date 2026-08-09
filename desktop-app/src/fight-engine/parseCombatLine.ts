@@ -18,7 +18,10 @@ export type CombatLogEvent =
   | { kind: 'auto-attack'; timestamp: number; enabled: boolean }
   | { kind: 'feign'; timestamp: number; successful: boolean }
   | { kind: 'player-spell-cast'; timestamp: number }
-  | { kind: 'crowd-control'; timestamp: number; target: string }
+  | { kind: 'crowd-control'; timestamp: number; target: string; effect: 'mez' | 'stun' }
+  | { kind: 'crowd-control-end'; timestamp: number; target: string }
+  | { kind: 'enemy-spell-cast'; timestamp: number; caster: string; spell: string }
+  | { kind: 'enemy-spell-interrupt'; timestamp: number; caster: string; spell: string }
   | { kind: 'pet-identity'; timestamp: number; pet: string }
 
 function cleanName(value: string): string {
@@ -56,7 +59,9 @@ export function parseCombatLine(line: string): CombatLogEvent | null {
 
   if (timestamp === null) return null
 
-  let match = line.match(/\]\s+(.+?) told you, '.*\bMaster\.'\s*$/i)
+  let match = line.match(
+    /\]\s+(.+?) told you, '(?:Attacking .+?|I am unable to wake .+?),? Master\.'\s*$/i
+  )
   if (match) {
     return {
       kind: 'pet-identity',
@@ -69,12 +74,65 @@ export function parseCombatLine(line: string): CombatLogEvent | null {
     return { kind: 'player-spell-cast', timestamp }
   }
 
-  match = line.match(/\]\s+(.+?) has been (?:mesmerized|enthralled)\.\s*$/i)
+  match = line.match(
+    /\]\s+(.+?) has been (?:mesmerized|entranced|enthralled)\.\s*$/i
+  )
   if (match) {
     return {
       kind: 'crowd-control',
       timestamp,
+      target: cleanName(match[1]),
+      effect: 'mez'
+    }
+  }
+
+  match = line.match(
+    /\]\s+(.+?) (?:is stunned by scintillating colors|begins to sway!)\s*$/i
+  )
+  if (match) {
+    return {
+      kind: 'crowd-control',
+      timestamp,
+      target: cleanName(match[1]),
+      effect: 'stun'
+    }
+  }
+
+  match = line.match(
+    /\]\s+Your (?:Mesmerization|Entrance|Enthrall) spell has worn off of (.+?)\.\s*$/i
+  )
+  if (!match) {
+    match = line.match(
+      /\]\s+(.+?) has been awakened by Whittler\.\s*$/i
+    )
+  }
+  if (match) {
+    return {
+      kind: 'crowd-control-end',
+      timestamp,
       target: cleanName(match[1])
+    }
+  }
+
+  match = line.match(
+    /\]\s+(.+?)'s (.+?) spell is interrupted\.\s*$/i
+  )
+  if (match && !/^your$/i.test(match[1])) {
+    return {
+      kind: 'enemy-spell-interrupt',
+      timestamp,
+      caster: cleanName(match[1]),
+      spell: match[2].trim()
+    }
+  }
+
+  match = line.match(/\]\s+(.+?) begins casting (.+?)\.\s*$/i)
+  if (match && !/^you$/i.test(match[1])) {
+    return {
+      kind: 'enemy-spell-cast',
+      timestamp,
+      caster: cleanName(match[1]),
+      spell: match[2].trim()
     }
   }
 

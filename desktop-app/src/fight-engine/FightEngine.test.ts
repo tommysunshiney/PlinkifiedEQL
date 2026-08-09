@@ -216,3 +216,268 @@ test('recognizes pet kill line shape from live log', () => {
     assert.equal(event.killer, 'Zonartik')
   }
 })
+
+
+test('keeps the Aug 9 09:19 live spectre as one continuous encounter', () => {
+  const engine = new FightEngine()
+
+  engine.ingestLines([
+    '[Sun Aug 09 09:19:34 2026] A spectre tries to slash YOU, but misses!',
+    '[Sun Aug 09 09:19:34 2026] A spectre cleaves YOU for 20 points of damage.',
+    '[Sun Aug 09 09:19:34 2026] a spectre hit you for 36 points of magic damage by Specter Lifetap.',
+    '[Sun Aug 09 09:19:35 2026] Auto attack is on.',
+    '[Sun Aug 09 09:19:35 2026] You backstab a spectre for 153 points of damage.',
+    '[Sun Aug 09 09:19:35 2026] You backstab a spectre for 702 points of damage.',
+    '[Sun Aug 09 09:19:35 2026] You slash a spectre for 19 points of damage.',
+    '[Sun Aug 09 09:19:37 2026] A spectre slashes YOU for 27 points of damage.',
+    '[Sun Aug 09 09:19:37 2026] You slash a spectre for 48 points of damage.',
+    '[Sun Aug 09 09:19:37 2026] You pierce a spectre for 87 points of damage.',
+    '[Sun Aug 09 09:19:39 2026] You pierce a spectre for 84 points of damage.',
+    '[Sun Aug 09 09:19:41 2026] A spectre slashes YOU for 10 points of damage.',
+    '[Sun Aug 09 09:19:42 2026] You slash a spectre for 34 points of damage.',
+    '[Sun Aug 09 09:19:42 2026] You pierce a spectre for 54 points of damage.',
+    '[Sun Aug 09 09:19:43 2026] A spectre bashes YOU for 7 points of damage.',
+    '[Sun Aug 09 09:19:43 2026] You backstab a spectre for 366 points of damage.',
+    '[Sun Aug 09 09:19:44 2026] You pierce a spectre for 100 points of damage. (Critical)',
+    '[Sun Aug 09 09:19:45 2026] A spectre slashes YOU for 48 points of damage.',
+    '[Sun Aug 09 09:19:46 2026] You slash a spectre for 185 points of damage. (Finishing Blow)',
+    '[Sun Aug 09 09:19:46 2026] You slash a spectre for 78 points of damage. (Finishing Blow)',
+    '[Sun Aug 09 09:19:46 2026] You have slain a spectre!'
+  ])
+
+  const snapshot = engine.snapshot(Date.parse('Sun Aug 09 09:19:46 2026'))
+  assert.equal(snapshot.currentFight, null)
+  assert.equal(snapshot.fights.length, 1)
+
+  const fight = snapshot.fights[0]
+  assert.equal(fight.endReason, 'victory')
+  assert.equal(fight.totalDamage, 1910)
+  assert.equal(fight.startedAt, Date.parse('Sun Aug 09 09:19:34 2026'))
+  assert.equal(fight.endedAt, Date.parse('Sun Aug 09 09:19:46 2026'))
+})
+
+test('incoming attacks against a known pet refresh encounter activity', () => {
+  const engine = new FightEngine({ fightTimeoutMs: 10_000 })
+
+  engine.ingestLines([
+    line(0, "Jann told you, 'Attacking a spectre Master.'"),
+    line(1, 'You slash a spectre for 40 points of damage.'),
+    line(9, 'A spectre slashes Jann for 10 points of damage.'),
+    line(17, 'A spectre tries to bash Jann, but misses!'),
+    line(18, 'You slash a spectre for 20 points of damage.'),
+    line(19, 'You have slain a spectre!')
+  ])
+
+  const snapshot = engine.snapshot(start + 19_000)
+  assert.equal(snapshot.fights.length, 1)
+  assert.equal(snapshot.fights[0].endReason, 'victory')
+  assert.equal(snapshot.fights[0].totalDamage, 60)
+})
+
+
+test('recognizes Entrance and Entranced as crowd control', () => {
+  const event = parseCombatLine(
+    line(0, 'a dar ghoul knight has been entranced.')
+  )
+
+  assert.equal(event?.kind, 'crowd-control')
+  if (event?.kind === 'crowd-control') {
+    assert.equal(event.target, 'a dar ghoul knight')
+    assert.equal(event.effect, 'mez')
+  }
+})
+
+test('controlled room pull survives long prep silence and resumes as one encounter', () => {
+  const engine = new FightEngine({ fightTimeoutMs: 30_000 })
+
+  engine.ingestLines([
+    line(0, 'Hoptor Thaggelum pet tries to punch YOU, but misses!'),
+    line(1, 'Hoptor Thaggelum hits YOU for 100 points of damage.'),
+    line(2, 'You begin casting Mesmerization VII.'),
+    line(3, 'Hoptor Thaggelum pet has been mesmerized.'),
+    line(3, 'Hoptor Thaggelum has been mesmerized.'),
+    line(10, 'You have slain Hoptor Thaggelum pet!'),
+    line(20, 'You begin casting Entrance VI.'),
+    line(21, 'a dar ghoul knight has been entranced.'),
+    line(55, 'Your Mesmerization spell has worn off of Hoptor Thaggelum.'),
+    line(55, 'You slash Hoptor Thaggelum for 200 points of damage.'),
+    line(70, 'You have slain Hoptor Thaggelum!'),
+    line(71, 'A dar ghoul knight hits YOU for 20 points of damage.'),
+    line(80, 'You have slain a dar ghoul knight!')
+  ])
+
+  const snapshot = engine.snapshot(start + 80_000)
+  assert.equal(snapshot.fights.length, 1)
+  assert.equal(snapshot.fights[0].endReason, 'victory')
+  assert.ok(snapshot.fights[0].targets.includes('Hoptor Thaggelum'))
+  assert.ok(snapshot.fights[0].targets.includes('a dar ghoul knight'))
+})
+
+test('owner death retires an engaged NPC pet that vanishes without its own kill line', () => {
+  const engine = new FightEngine()
+
+  engine.ingestLines([
+    line(0, 'A wan ghoul knight hits YOU for 20 points of damage.'),
+    line(1, 'A wan ghoul knight pet hits YOU for 10 points of damage.'),
+    line(2, 'You have slain a wan ghoul knight!')
+  ])
+
+  const snapshot = engine.snapshot(start + 2_000)
+  assert.equal(snapshot.currentFight, null)
+  assert.equal(snapshot.fights.length, 1)
+  assert.equal(snapshot.fights[0].endReason, 'victory')
+})
+
+test('parses enemy spell cast and explicit interrupt', () => {
+  const cast = parseCombatLine(
+    line(0, 'A frenzied ghoul begins casting Greater Healing.')
+  )
+  const interrupted = parseCombatLine(
+    line(1, "a frenzied ghoul's Greater Healing spell is interrupted.")
+  )
+
+  assert.equal(cast?.kind, 'enemy-spell-cast')
+  assert.equal(interrupted?.kind, 'enemy-spell-interrupt')
+})
+
+
+test('tracks per-mob burn DPS separately from total encounter duration', () => {
+  const engine = new FightEngine()
+
+  engine.ingestLines([
+    line(0, 'A dar ghoul knight hits YOU for 20 points of damage.'),
+    line(1, 'You begin casting Mesmerization VII.'),
+    line(2, 'a dar ghoul knight has been mesmerized.'),
+    line(20, 'Hoptor Thaggelum hits YOU for 50 points of damage.'),
+    line(21, 'Hoptor Thaggelum has been mesmerized.'),
+    line(40, 'Your Mesmerization spell has worn off of Hoptor Thaggelum.'),
+    line(41, 'You slash Hoptor Thaggelum for 100 points of damage.'),
+    line(46, 'You slash Hoptor Thaggelum for 100 points of damage.'),
+    line(51, 'You have slain Hoptor Thaggelum!'),
+    line(52, 'Your Mesmerization spell has worn off of a dar ghoul knight.'),
+    line(53, 'You slash a dar ghoul knight for 60 points of damage.'),
+    line(58, 'You slash a dar ghoul knight for 60 points of damage.'),
+    line(63, 'You have slain a dar ghoul knight!')
+  ])
+
+  const fight = engine.snapshot(start + 63_000).fights[0]
+  assert.equal(fight.endReason, 'victory')
+
+  const hoptor = fight.mobs.find((mob) => /Hoptor/i.test(mob.name))
+  const dar = fight.mobs.find((mob) => /dar ghoul/i.test(mob.name))
+
+  assert.ok(hoptor)
+  assert.ok(dar)
+  assert.equal(hoptor.totalDamage, 200)
+  assert.equal(hoptor.burnDurationSeconds, 10)
+  assert.equal(hoptor.activeDamage, 200)
+  assert.equal(hoptor.dps, 20)
+  assert.equal(dar.totalDamage, 120)
+  assert.equal(dar.burnDurationSeconds, 10)
+  assert.equal(dar.activeDamage, 120)
+  assert.equal(dar.dps, 12)
+})
+
+test('marks a mob first observed later as joining the encounter later', () => {
+  const engine = new FightEngine()
+
+  engine.ingestLines([
+    line(0, 'A ghoul hits YOU for 10 points of damage.'),
+    line(1, 'You slash a ghoul for 25 points of damage.'),
+    line(12, 'A ghoul wizard hits YOU for 15 points of damage.'),
+    line(13, 'You slash a ghoul wizard for 30 points of damage.'),
+    line(14, 'You have slain a ghoul!'),
+    line(15, 'You have slain a ghoul wizard!')
+  ])
+
+  const fight = engine.snapshot(start + 15_000).fights[0]
+  const add = fight.mobs.find((mob) => /wizard/i.test(mob.name))
+
+  assert.ok(add)
+  assert.equal(add.joinedOffsetMs, 12_000)
+  assert.equal(add.joinedLater, true)
+})
+
+
+test('does not overwrite an explicit pet death when the owner dies later', () => {
+  const engine = new FightEngine()
+
+  engine.ingestLines([
+    line(0, 'Hoptor Thaggelum pet hits YOU for 10 points of damage.'),
+    line(1, 'You hit Hoptor Thaggelum pet for 100 points of damage.'),
+    line(5, 'You have slain Hoptor Thaggelum pet!'),
+    line(6, 'Hoptor Thaggelum hits YOU for 10 points of damage.'),
+    line(7, 'You hit Hoptor Thaggelum for 100 points of damage.'),
+    line(20, 'You have slain Hoptor Thaggelum!')
+  ])
+
+  const fight = engine.snapshot(start + 20_000).fights[0]
+  const pet = fight.mobs.find((mob) => /Hoptor Thaggelum pet/i.test(mob.name))
+
+  assert.ok(pet)
+  assert.equal(pet.killedAt, start + 5_000)
+})
+
+test('damage shield damage does not start a target burn', () => {
+  const engine = new FightEngine()
+
+  engine.ingestLines([
+    line(0, 'Hoptor Thaggelum hits YOU for 10 points of damage.'),
+    line(1, 'Hoptor Thaggelum is pierced by YOUR thorns for 25 points of non-melee damage.'),
+    line(20, 'You hit Hoptor Thaggelum for 100 points of damage.'),
+    line(25, 'You hit Hoptor Thaggelum for 100 points of damage.'),
+    line(30, 'You have slain Hoptor Thaggelum!')
+  ])
+
+  const fight = engine.snapshot(start + 30_000).fights[0]
+  const hoptor = fight.mobs.find((mob) => /Hoptor/i.test(mob.name))
+
+  assert.ok(hoptor)
+  assert.equal(hoptor.totalDamage, 225)
+  assert.equal(hoptor.activeDamage, 200)
+  assert.equal(hoptor.burnStartedAt, start + 20_000)
+  assert.equal(hoptor.burnDurationSeconds, 10)
+  assert.equal(hoptor.dps, 20)
+})
+
+test('splits per-mob active DPS across long parked gaps', () => {
+  const engine = new FightEngine()
+
+  engine.ingestLines([
+    line(0, 'A dar ghoul knight hits YOU for 10 points of damage.'),
+    line(1, 'You hit a dar ghoul knight for 100 points of damage.'),
+    line(5, 'You hit a dar ghoul knight for 100 points of damage.'),
+    line(6, 'You begin casting Mesmerization VII.'),
+    line(7, 'a dar ghoul knight has been mesmerized.'),
+    line(90, 'Your Mesmerization spell has worn off of a dar ghoul knight.'),
+    line(91, 'You hit a dar ghoul knight for 100 points of damage.'),
+    line(95, 'You hit a dar ghoul knight for 100 points of damage.'),
+    line(100, 'You have slain a dar ghoul knight!')
+  ])
+
+  const fight = engine.snapshot(start + 100_000).fights[0]
+  const dar = fight.mobs.find((mob) => /dar ghoul knight/i.test(mob.name))
+
+  assert.ok(dar)
+  assert.equal(dar.burnSegments.length, 2)
+  assert.equal(dar.burnDurationSeconds, 14)
+  assert.equal(dar.activeDamage, 400)
+  assert.equal(dar.elapsedTtkSeconds, 99)
+  assert.ok(Math.abs(dar.dps - 400 / 14) < 0.001)
+})
+
+test('prefers a real NPC over its pet for the encounter title', () => {
+  const engine = new FightEngine()
+
+  engine.ingestLines([
+    line(0, 'Hoptor Thaggelum pet hits YOU for 10 points of damage.'),
+    line(1, 'Hoptor Thaggelum hits YOU for 10 points of damage.'),
+    line(2, 'You hit Hoptor Thaggelum pet for 100 points of damage.'),
+    line(3, 'You have slain Hoptor Thaggelum pet!'),
+    line(4, 'You hit Hoptor Thaggelum for 100 points of damage.'),
+    line(5, 'You have slain Hoptor Thaggelum!')
+  ])
+
+  const fight = engine.snapshot(start + 5_000).fights[0]
+  assert.match(fight.target, /^Hoptor Thaggelum \+/)
+})

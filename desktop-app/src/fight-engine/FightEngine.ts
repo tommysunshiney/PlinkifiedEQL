@@ -3,9 +3,11 @@ import type { CombatLogEvent } from './parseCombatLine.ts'
 import {
   DEFAULT_AUTO_ATTACK_GRACE_MS,
   DEFAULT_CROWD_CONTROL_PAUSE_MS,
+  DEFAULT_CONTROLLED_FIGHT_TIMEOUT_MS,
   DEFAULT_FIGHT_TIMEOUT_MS,
   DEFAULT_POST_KILL_COMBAT_IGNORE_MS,
   DEFAULT_POST_KILL_DOT_IGNORE_MS,
+  DEFAULT_MOB_BURN_GAP_MS,
   DEFAULT_ROLLING_WINDOW_MS,
   DEFAULT_SPELL_CAST_PAUSE_MS
 } from './types.ts'
@@ -25,8 +27,11 @@ type MutableFight = {
   endedAt: number | null
   endReason: FightEndReason | null
   targets: Map<string, string>
+  targetJoinedAt: Map<string, number>
+  targetKilledAt: Map<string, number>
   defeatedTargets: Set<string>
   damageEvents: FightDamageEvent[]
+  controlledTargets: Set<string>
 }
 
 type PendingActorEvent = Extract<CombatLogEvent, { kind: 'actor-damage' | 'actor-miss' }>
@@ -207,7 +212,44 @@ export class FightEngine {
           event.timestamp - this.lastPlayerSpellCastAt <=
           DEFAULT_SPELL_CAST_PAUSE_MS
         ) {
+          this.recordActivity(event.timestamp, event.target)
+          if (event.effect === 'mez') {
+            this.currentFight?.controlledTargets.add(normalizeName(event.target))
+          }
           this.pauseAutoAttackWarning(event.timestamp + DEFAULT_CROWD_CONTROL_PAUSE_MS)
+        } else if (
+          this.currentFight?.targets.has(normalizeName(event.target))
+        ) {
+          this.currentFight.lastActivityAt = Math.max(
+            this.currentFight.lastActivityAt,
+            event.timestamp
+          )
+        }
+        return
+
+      case 'crowd-control-end':
+        if (this.currentFight) {
+          const key = normalizeName(event.target)
+          this.currentFight.controlledTargets.delete(key)
+          if (this.currentFight.targets.has(key)) {
+            this.currentFight.lastActivityAt = Math.max(
+              this.currentFight.lastActivityAt,
+              event.timestamp
+            )
+          }
+        }
+        return
+
+      case 'enemy-spell-cast':
+      case 'enemy-spell-interrupt':
+        if (
+          this.currentFight?.targets.has(normalizeName(event.caster))
+        ) {
+          this.currentFight.lastActivityAt = Math.max(
+            this.currentFight.lastActivityAt,
+            event.timestamp
+          )
+          this.combatState.lastActivityAt = event.timestamp
         }
         return
 
@@ -239,8 +281,17 @@ export class FightEngine {
   }
 
   private acceptOrQueueActorEvent(event: PendingActorEvent): void {
+    // A known pet attacking an NPC is outgoing pet combat.
     if (this.isKnownPet(event.actor)) {
       this.recordPetEvent(event)
+      return
+    }
+
+    // An NPC attacking a positively identified pet is equally valid evidence
+    // that the encounter is still active. Do not count this as player/pet DPS,
+    // but do refresh the NPC engagement timestamp.
+    if (this.isKnownPet(event.target)) {
+      this.recordActivity(event.timestamp, event.actor)
       return
     }
 
@@ -307,16 +358,23 @@ export class FightEngine {
         endedAt: null,
         endReason: null,
         targets: new Map(),
+        targetJoinedAt: new Map(),
+        targetKilledAt: new Map(),
         defeatedTargets: new Set(),
-        damageEvents: []
+        damageEvents: [],
+        controlledTargets: new Set()
       }
     }
 
     const normalizedTarget = normalizeName(target)
+    const isNewTarget = !this.currentFight.targets.has(normalizedTarget)
     this.currentFight.targets.set(
       normalizedTarget,
       this.currentFight.targets.get(normalizedTarget) ?? target
     )
+    if (isNewTarget) {
+      this.currentFight.targetJoinedAt.set(normalizedTarget, timestamp)
+    }
     this.currentFight.lastActivityAt = Math.max(this.currentFight.lastActivityAt, timestamp)
     this.combatState.lastActivityAt = timestamp
   }
@@ -326,11 +384,31 @@ export class FightEngine {
     this.recentlyDefeatedTargets.set(normalizedTarget, timestamp)
 
     if (!this.currentFight) return
+    const isNewTarget = !this.currentFight.targets.has(normalizedTarget)
     this.currentFight.targets.set(
       normalizedTarget,
       this.currentFight.targets.get(normalizedTarget) ?? target
     )
+    if (isNewTarget) {
+      this.currentFight.targetJoinedAt.set(normalizedTarget, timestamp)
+    }
+    this.currentFight.targetKilledAt.set(normalizedTarget, timestamp)
     this.currentFight.defeatedTargets.add(normalizedTarget)
+    this.currentFight.controlledTargets.delete(normalizedTarget)
+
+    // EQL NPC pets commonly vanish when their owner dies without emitting
+    // their own slain line. If "<owner> pet" is already part of this
+    // encounter, retire it with the owner so the room can end in victory
+    // instead of hanging until timeout.
+    const ownedPet = `${normalizedTarget} pet`
+    if (this.currentFight.targets.has(ownedPet)) {
+      this.currentFight.defeatedTargets.add(ownedPet)
+      if (!this.currentFight.targetKilledAt.has(ownedPet)) {
+        this.currentFight.targetKilledAt.set(ownedPet, timestamp)
+      }
+      this.currentFight.controlledTargets.delete(ownedPet)
+    }
+
     this.currentFight.lastActivityAt = Math.max(this.currentFight.lastActivityAt, timestamp)
     this.combatState.lastActivityAt = timestamp
 
@@ -360,10 +438,14 @@ export class FightEngine {
   }
 
   private closeTimedOutFight(clock: number): void {
-    if (
-      this.currentFight &&
-      clock - this.currentFight.lastActivityAt > this.fightTimeoutMs
-    ) {
+    if (!this.currentFight) return
+
+    const timeoutMs =
+      this.currentFight.controlledTargets.size > 0
+        ? Math.max(this.fightTimeoutMs, DEFAULT_CONTROLLED_FIGHT_TIMEOUT_MS)
+        : this.fightTimeoutMs
+
+    if (clock - this.currentFight.lastActivityAt > timeoutMs) {
       this.finishCurrentFight(this.currentFight.lastActivityAt, 'timeout')
     }
   }
@@ -405,11 +487,143 @@ export class FightEngine {
     const defeatedTargets = Array.from(fight.defeatedTargets).map(
       (target) => fight.targets.get(target) ?? target
     )
+    const primaryTarget =
+      targets.find((candidate) => !/\spet$/i.test(candidate)) ??
+      targets[0] ??
+      'Unknown target'
     const target = targets.length <= 1
-      ? targets[0] ?? 'Unknown target'
-      : `${targets[0]} + ${targets.length - 1} add${targets.length === 2 ? '' : 's'}`
+      ? primaryTarget
+      : `${primaryTarget} + ${targets.length - 1} add${targets.length === 2 ? '' : 's'}`
     const fightDps = totalDamage / durationSeconds
     const active = fight.endedAt === null
+
+    const mobs = targets.map((mobName) => {
+      const key = normalizeName(mobName)
+      const joinedAt = fight.targetJoinedAt.get(key) ?? fight.startedAt
+      const killedAt = fight.targetKilledAt.get(key) ?? null
+      const mobDamageEvents = damageEvents.filter(
+        (event) => normalizeName(event.target) === key
+      )
+      const mobFirstDamageAt = mobDamageEvents[0]?.timestamp ?? null
+      const mobLastDamageAt =
+        mobDamageEvents[mobDamageEvents.length - 1]?.timestamp ?? null
+
+      // Passive damage shields count toward encounter damage, but do not
+      // prove that this mob is the target the player deliberately started
+      // working.
+      const deliberateDamageEvents = mobDamageEvents.filter(
+        (event) => event.source !== 'damage-shield'
+      )
+
+      // A target can be worked, parked/CC'd, then worked again. Split long
+      // target-specific damage gaps into active burn segments instead of
+      // charging parked time to target DPS.
+      const rawBurnGroups: typeof deliberateDamageEvents[] = []
+      for (const event of deliberateDamageEvents) {
+        const currentGroup = rawBurnGroups[rawBurnGroups.length - 1]
+        const previous = currentGroup?.[currentGroup.length - 1]
+
+        if (
+          !currentGroup ||
+          !previous ||
+          event.timestamp - previous.timestamp > DEFAULT_MOB_BURN_GAP_MS
+        ) {
+          rawBurnGroups.push([event])
+        } else {
+          currentGroup.push(event)
+        }
+      }
+
+      const burnSegments = rawBurnGroups.map((group, index) => {
+        const startedAt = group[0].timestamp
+        const lastDeliberateAt = group[group.length - 1].timestamp
+        const isLastSegment = index === rawBurnGroups.length - 1
+        const nearbyKillAt =
+          isLastSegment &&
+          killedAt !== null &&
+          killedAt >= lastDeliberateAt &&
+          killedAt - lastDeliberateAt <= DEFAULT_MOB_BURN_GAP_MS
+            ? killedAt
+            : null
+        const endedAt = Math.max(
+          startedAt + 1000,
+          nearbyKillAt ?? lastDeliberateAt + 1000
+        )
+        const damage = mobDamageEvents
+          .filter(
+            (event) =>
+              event.timestamp >= startedAt &&
+              event.timestamp <= endedAt
+          )
+          .reduce((total, event) => total + event.damage, 0)
+
+        return {
+          startedAt,
+          endedAt,
+          durationSeconds: (endedAt - startedAt) / 1000,
+          damage
+        }
+      })
+
+      const burnStartedAt = burnSegments[0]?.startedAt ?? null
+      const burnEndedAt =
+        burnSegments[burnSegments.length - 1]?.endedAt ?? null
+      const burnDurationSeconds = burnSegments.reduce(
+        (total, segment) => total + segment.durationSeconds,
+        0
+      )
+      const activeDamage = burnSegments.reduce(
+        (total, segment) => total + segment.damage,
+        0
+      )
+      const elapsedTtkSeconds =
+        burnStartedAt === null
+          ? 0
+          : Math.max(
+              0,
+              ((killedAt ?? mobLastDamageAt ?? burnStartedAt) -
+                burnStartedAt) /
+                1000
+            )
+
+      const mobTotalDamage = mobDamageEvents.reduce(
+        (total, event) => total + event.damage,
+        0
+      )
+      const mobPlayerDamage = mobDamageEvents
+        .filter((event) => event.actorType === 'player')
+        .reduce((total, event) => total + event.damage, 0)
+      const mobPetDamage = mobDamageEvents
+        .filter((event) => event.actorType === 'pet')
+        .reduce((total, event) => total + event.damage, 0)
+
+      return {
+        name: mobName,
+        joinedAt,
+        joinedOffsetMs: Math.max(0, joinedAt - fight.startedAt),
+        firstDamageAt: mobFirstDamageAt,
+        lastDamageAt: mobLastDamageAt,
+        killedAt,
+        burnStartedAt,
+        burnEndedAt,
+        burnDurationSeconds,
+        burnSegments,
+        activeDamage,
+        elapsedTtkSeconds,
+        totalDamage: mobTotalDamage,
+        playerDamage: mobPlayerDamage,
+        petDamage: mobPetDamage,
+        dps: burnDurationSeconds > 0
+          ? activeDamage / burnDurationSeconds
+          : 0,
+        bestHit: mobDamageEvents.reduce(
+          (best, event) => Math.max(best, event.damage),
+          0
+        ),
+        defeated: fight.defeatedTargets.has(key),
+        joinedLater: joinedAt - fight.startedAt >= 5000
+      }
+    })
 
     const combatantMap = new Map<string, { name: string; type: 'player' | 'pet'; damage: number; bestHit: number }>()
     for (const event of damageEvents) {
@@ -441,6 +655,7 @@ export class FightEngine {
       playerDamage,
       petDamage,
       combatants,
+      mobs,
       fightDps,
       rollingDps,
       displayDps: active ? rollingDps : fightDps,
