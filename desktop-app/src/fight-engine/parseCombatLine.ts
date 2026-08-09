@@ -10,6 +10,7 @@ export type CombatLogEvent =
   | { kind: 'player-miss'; timestamp: number; target: string }
   | { kind: 'actor-miss'; timestamp: number; actor: string; target: string }
   | { kind: 'incoming-damage'; timestamp: number; attacker: string }
+  | { kind: 'incoming-dot'; timestamp: number; attacker: string }
   | { kind: 'incoming-miss'; timestamp: number; attacker: string }
   | { kind: 'kill'; timestamp: number; target: string; killer: string | null }
   | { kind: 'death'; timestamp: number }
@@ -194,17 +195,26 @@ export function parseCombatLine(line: string): CombatLogEvent | null {
   }
   if (!match) {
     match = line.match(
-      /\]\s+You have taken\s+\d+\s+damage from\s+.+?\s+by\s+(.+?)[.!]?$/i
-    )
-  }
-  if (!match) {
-    match = line.match(
       /\]\s+YOU are (?:pierced by|burned by)\s+(.+?)'s\s+(?:thorns|flames)\s+for\s+\d+\s+points?/i
     )
   }
   if (match) {
     return {
       kind: 'incoming-damage',
+      timestamp,
+      attacker: cleanName(match[1])
+    }
+  }
+
+  // Periodic incoming spell damage is useful encounter context, but it is
+  // not evidence that an enemy is currently in melee range. It must never
+  // arm the swing alarm by itself.
+  match = line.match(
+    /\]\s+You have taken\s+\d+\s+damage from\s+.+?\s+by\s+(.+?)[.!]?$/i
+  )
+  if (match) {
+    return {
+      kind: 'incoming-dot',
       timestamp,
       attacker: cleanName(match[1])
     }

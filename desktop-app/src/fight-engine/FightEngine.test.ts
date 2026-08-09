@@ -165,6 +165,48 @@ test('allows clear player melee evidence to start a same-named new target immedi
   assert.equal(snapshot.currentFight?.totalDamage, 30)
 })
 
+
+test('lingering incoming DOT after zoning does not reopen combat or arm AA warning', () => {
+  const engine = new FightEngine()
+  engine.ingestLines([
+    line(0, 'Auto attack is on.'),
+    line(1, 'King Tranix slashes YOU for 120 points of damage.'),
+    line(2, "You have entered Nagafen's Lair - Solo."),
+    line(8, 'You have taken 20 damage from Dooming Darkness by King Tranix.'),
+    line(14, 'You have taken 20 damage from Dooming Darkness by King Tranix.'),
+    line(20, 'You have taken 20 damage from Dooming Darkness by King Tranix.')
+  ])
+
+  const snapshot = engine.snapshot(start + 30_000)
+  assert.equal(snapshot.currentFight, null)
+  assert.equal(snapshot.fights.length, 1)
+  assert.equal(snapshot.fights[0].endReason, 'zone')
+  assert.equal(snapshot.combatState.autoAttackWarning, false)
+})
+
+test('incoming DOT can extend an active fight without arming AA warning', () => {
+  const engine = new FightEngine()
+  engine.ingestLines([
+    line(0, 'You slash a ghoul for 20 points of damage.'),
+    line(1, 'You have taken 12 damage from Choking by a ghoul.')
+  ])
+
+  const snapshot = engine.snapshot(start + 2_000)
+  assert.equal(snapshot.currentFight?.target, 'a ghoul')
+  assert.equal(snapshot.combatState.autoAttackWarning, false)
+})
+
+test('parses periodic incoming spell damage separately from direct attacks', () => {
+  const event = parseCombatLine(
+    line(0, 'You have taken 20 damage from Dooming Darkness by King Tranix.')
+  )
+
+  assert.equal(event?.kind, 'incoming-dot')
+  if (event?.kind === 'incoming-dot') {
+    assert.equal(event.attacker, 'King Tranix')
+  }
+})
+
 test('recognizes pet kill line shape from live log', () => {
   const event = parseCombatLine(line(0, 'A zol ghoul knight has been slain by Zonartik!'))
 

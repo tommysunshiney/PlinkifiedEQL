@@ -43,6 +43,18 @@ function getTimeLabel(value: string): string {
   })
 }
 
+function getDayLabel(value: string): string {
+  const timestamp = Date.parse(value)
+  if (Number.isNaN(timestamp)) return 'Unknown date'
+
+  return new Date(timestamp).toLocaleDateString([], {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric'
+  })
+}
+
 function getIcon(type: string): string {
   if (type === 'incident') return '🚨'
   if (type === 'instance') return '🧭'
@@ -135,6 +147,23 @@ export default function AdventureJournalPage() {
 
     return entries.filter((entry) => entry.entryType === 'incident')
   }, [activeFilter, entries])
+
+  const groupedVisibleEntries = useMemo(() => {
+    const groups: Array<{ label: string; entries: JournalRecord[] }> = []
+
+    for (const entry of visibleEntries) {
+      const label = getDayLabel(entry.occurredAt)
+      const current = groups[groups.length - 1]
+
+      if (!current || current.label !== label) {
+        groups.push({ label, entries: [entry] })
+      } else {
+        current.entries.push(entry)
+      }
+    }
+
+    return groups
+  }, [visibleEntries])
 
   const lootCount = entries.filter(
     (entry) => entry.entryType === 'loot'
@@ -229,20 +258,25 @@ export default function AdventureJournalPage() {
             </div>
           ) : !journalMessage ? (
             <div className="journal-timeline">
-              {visibleEntries.map((entry) => (
-                <div
-                  className={`journal-entry entry-${entry.entryType}`}
-                  key={entry.id}
-                >
-                  <time>{getTimeLabel(entry.occurredAt)}</time>
-                  <span className="journal-entry-icon">
-                    {getIcon(entry.entryType)}
-                  </span>
-                  <div>
-                    <strong>{entry.title}</strong>
-                    <p>{entry.narrative}</p>
-                  </div>
-                </div>
+              {groupedVisibleEntries.map((group) => (
+                <section className="journal-day-group" key={group.label}>
+                  <h4 className="journal-day-heading">{group.label}</h4>
+                  {group.entries.map((entry) => (
+                    <div
+                      className={`journal-entry entry-${entry.entryType}`}
+                      key={entry.id}
+                    >
+                      <time>{getTimeLabel(entry.occurredAt)}</time>
+                      <span className="journal-entry-icon">
+                        {getIcon(entry.entryType)}
+                      </span>
+                      <div>
+                        <strong>{entry.title}</strong>
+                        <p>{entry.narrative}</p>
+                      </div>
+                    </div>
+                  ))}
+                </section>
               ))}
             </div>
           ) : null}

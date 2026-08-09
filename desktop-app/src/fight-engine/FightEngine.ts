@@ -151,6 +151,15 @@ export class FightEngine {
         this.confirmPet(event.pet)
         return
 
+      case 'incoming-dot':
+        // Lingering DOTs can tick after Exodus, zoning, or a kill. They may
+        // extend an encounter that is already active, but they cannot create
+        // or reopen combat and they never arm the auto-attack warning.
+        if (this.currentFight) {
+          this.recordActivity(event.timestamp, event.attacker)
+        }
+        return
+
       case 'incoming-damage':
       case 'incoming-miss':
         if (
