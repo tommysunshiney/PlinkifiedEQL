@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSession } from '../session/SessionContext'
-import type { BossRecord, DatabaseStatus } from '../types/database'
+import type {
+  BossRecord,
+  DatabaseStatus,
+  JournalRecord
+} from '../types/database'
 
 type JournalFilter =
   | 'all'
@@ -19,17 +23,6 @@ type JournalEntryType =
   | 'instance'
   | 'death'
 
-type JournalEntry = {
-  id: string
-  timestamp: number
-  timeLabel: string
-  type: JournalEntryType
-  icon: string
-  title: string
-  detail: string
-  zoneName?: string
-}
-
 const filters: Array<{ id: JournalFilter; label: string }> = [
   { id: 'all', label: 'All Activity' },
   { id: 'fights', label: 'Fights' },
@@ -38,202 +31,73 @@ const filters: Array<{ id: JournalFilter; label: string }> = [
   { id: 'incidents', label: 'OH SHIT!' }
 ]
 
-function getTimestamp(line: string): number {
-  const logTimestamp = line.match(/^\[([^\]]+)\]/)?.[1]
-  const markerTimestamp = line.match(
-    /PEQL (?:OH SHIT!|SESSION START) :: (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/
-  )?.[1]
-  const value = Date.parse(logTimestamp ?? markerTimestamp ?? '')
+function getTimeLabel(value: string): string {
+  const timestamp = Date.parse(value)
+  if (Number.isNaN(timestamp)) return '--'
 
-  return Number.isNaN(value) ? 0 : value
-}
-
-function getTimeLabel(timestamp: number): string {
-  if (!timestamp) return '--:--:--'
-
-  return new Date(timestamp).toLocaleTimeString([], {
+  return new Date(timestamp).toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
     hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
+    minute: '2-digit'
   })
 }
 
-function cleanZoneName(value: string): string {
-  return value.trim().replace(/\.$/, '').trim()
-}
-
-function lineToEntry(line: string, index: number): JournalEntry | null {
-  const timestamp = getTimestamp(line)
-  const id = `${timestamp}-${index}`
-  const timeLabel = getTimeLabel(timestamp)
-  let match: RegExpMatchArray | null
-
-  if (line.includes('===== PEQL OH SHIT!')) {
-    return {
-      id,
-      timestamp,
-      timeLabel,
-      type: 'incident',
-      icon: '🚨',
-      title: 'OH SHIT combat bookmark',
-      detail: 'Marked for later review.'
-    }
-  }
-
-  match = line.match(/Player (.+?) creating instance (.+?) (\d+)\.?$/i)
-  if (match) {
-    const character = match[1].trim()
-    const zoneName = cleanZoneName(match[2])
-    const instanceId = match[3]
-
-    return {
-      id,
-      timestamp,
-      timeLabel,
-      type: 'instance',
-      icon: '🧭',
-      title: `${character} created an instance of ${zoneName}`,
-      detail: `Instance #${instanceId} requested.`,
-      zoneName
-    }
-  }
-
-  match = line.match(/You have entered (.+?) (\d+) \((.+?)\)\.?$/i)
-  if (match) {
-    const zoneName = cleanZoneName(match[1])
-    const tier = match[2]
-    const difficulty = match[3].trim()
-
-    return {
-      id,
-      timestamp,
-      timeLabel,
-      type: 'zone',
-      icon: '🗺️',
-      title: `Ventured into ${zoneName}`,
-      detail: `${difficulty} tier (+${tier}).`,
-      zoneName
-    }
-  }
-
-  match = line.match(/You have entered (.+?) - Solo\.?$/i)
-  if (match) {
-    const zoneName = cleanZoneName(match[1])
-
-    return {
-      id,
-      timestamp,
-      timeLabel,
-      type: 'zone',
-      icon: '🗺️',
-      title: `Ventured into ${zoneName}`,
-      detail: 'Solo instance.',
-      zoneName
-    }
-  }
-
-  match = line.match(/You have entered (.+?)\.?$/i)
-  if (match) {
-    const zoneName = cleanZoneName(match[1])
-
-    return {
-      id,
-      timestamp,
-      timeLabel,
-      type: 'zone',
-      icon: '🗺️',
-      title: `Ventured into ${zoneName}`,
-      detail: 'Zone transition recorded.',
-      zoneName
-    }
-  }
-
-  match = line.match(/You have gained a level! Welcome to level (\d+)!/i)
-  if (match) {
-    return {
-      id,
-      timestamp,
-      timeLabel,
-      type: 'level',
-      icon: '⬆️',
-      title: `Reached level ${match[1]}`,
-      detail: 'Level gain recorded.'
-    }
-  }
-
-  match = line.match(/(.+?) has been slain by YOU!/i)
-  if (match) {
-    return {
-      id,
-      timestamp,
-      timeLabel,
-      type: 'fight',
-      icon: '⚔️',
-      title: `Defeated ${match[1]}`,
-      detail: 'Confirmed personal kill.'
-    }
-  }
-
-  match = line.match(/You have slain (.+?)[!.]?$/i)
-  if (match) {
-    return {
-      id,
-      timestamp,
-      timeLabel,
-      type: 'fight',
-      icon: '⚔️',
-      title: `Defeated ${match[1]}`,
-      detail: 'Confirmed personal kill.'
-    }
-  }
-
-  if (/You have been slain|You have died|You died/i.test(line)) {
-    return {
-      id,
-      timestamp,
-      timeLabel,
-      type: 'death',
-      icon: '☠️',
-      title: 'Character death',
-      detail: 'Death recorded in the session.'
-    }
-  }
-
-  match = line.match(/You have looted (.+?) from .+?['’]s corpse/i)
-  if (!match) match = line.match(/You have looted (.+?)(?:[.!]|--)?$/i)
-  if (!match) match = line.match(/You loot (.+?)[.!]?$/i)
-  if (!match) match = line.match(/(.+?) has been added to your inventory/i)
-  if (match) {
-    return {
-      id,
-      timestamp,
-      timeLabel,
-      type: 'loot',
-      icon: '🎒',
-      title: match[1].replace(/^--/, '').trim(),
-      detail: 'Loot recorded.'
-    }
-  }
-
-  return null
+function getIcon(type: string): string {
+  if (type === 'incident') return '🚨'
+  if (type === 'instance') return '🧭'
+  if (type === 'zone') return '🗺️'
+  if (type === 'level') return '⬆️'
+  if (type === 'fight' || type === 'named') return '⚔️'
+  if (type === 'death') return '☠️'
+  if (type === 'loot') return '🎒'
+  return '•'
 }
 
 export default function AdventureJournalPage() {
   const [activeFilter, setActiveFilter] = useState<JournalFilter>('all')
   const [databaseStatus, setDatabaseStatus] = useState<DatabaseStatus | null>(null)
+  const [entries, setEntries] = useState<JournalRecord[]>([])
+  const [journalMessage, setJournalMessage] = useState('')
   const [bossQuery, setBossQuery] = useState('')
   const [bossResults, setBossResults] = useState<BossRecord[]>([])
   const [bossSearchMessage, setBossSearchMessage] = useState('')
-  const { selectedLog, sessionLines, isConnected } = useSession()
+  const {
+    selectedLog,
+    sessionLines,
+    isConnected,
+    journalRevision
+  } = useSession()
+
+  async function refreshJournal() {
+    try {
+      const [status, savedEntries] = await Promise.all([
+        window.electronAPI.getDatabaseStatus(),
+        window.electronAPI.listJournalEntries(5000)
+      ])
+
+      setDatabaseStatus(status)
+      setEntries(savedEntries)
+      setJournalMessage('')
+    } catch (error) {
+      console.error('Unable to load persistent Adventure Journal:', error)
+      setJournalMessage('Unable to load saved Adventure Journal history.')
+    }
+  }
 
   useEffect(() => {
-    window.electronAPI
-      .getDatabaseStatus()
-      .then(setDatabaseStatus)
-      .catch((error) => {
-        console.error('Unable to read PEQL database status:', error)
-      })
-  }, [])
+    void refreshJournal()
+  }, [journalRevision])
+
+  useEffect(() => {
+    if (!isConnected) return
+
+    const timer = window.setTimeout(() => {
+      void refreshJournal()
+    }, 250)
+
+    return () => window.clearTimeout(timer)
+  }, [sessionLines.length, isConnected])
 
   async function handleBossSearch() {
     const query = bossQuery.trim()
@@ -257,36 +121,35 @@ export default function AdventureJournalPage() {
     }
   }
 
-  const entries = useMemo(() => {
-    return sessionLines
-      .map(lineToEntry)
-      .filter((entry): entry is JournalEntry => entry !== null)
-      .sort((a, b) => b.timestamp - a.timestamp)
-  }, [sessionLines])
-
   const visibleEntries = useMemo(() => {
     if (activeFilter === 'all') return entries
     if (activeFilter === 'fights') {
-      return entries.filter((entry) => entry.type === 'fight')
+      return entries.filter((entry) => entry.entryType === 'fight')
     }
     if (activeFilter === 'named') {
-      return entries.filter((entry) => entry.type === 'named')
+      return entries.filter((entry) => entry.entryType === 'named')
     }
     if (activeFilter === 'loot') {
-      return entries.filter((entry) => entry.type === 'loot')
+      return entries.filter((entry) => entry.entryType === 'loot')
     }
 
-    return entries.filter((entry) => entry.type === 'incident')
+    return entries.filter((entry) => entry.entryType === 'incident')
   }, [activeFilter, entries])
 
-  const lootCount = entries.filter((entry) => entry.type === 'loot').length
-  const incidentCount = entries.filter((entry) => entry.type === 'incident').length
+  const lootCount = entries.filter(
+    (entry) => entry.entryType === 'loot'
+  ).length
+  const incidentCount = entries.filter(
+    (entry) => entry.entryType === 'incident'
+  ).length
   const zoneCount = new Set(
     entries
-      .filter((entry) => entry.type === 'zone' && entry.zoneName)
+      .filter((entry) => entry.entryType === 'zone' && entry.zoneName)
       .map((entry) => entry.zoneName)
   ).size
-  const instanceCount = entries.filter((entry) => entry.type === 'instance').length
+  const instanceCount = entries.filter(
+    (entry) => entry.entryType === 'instance'
+  ).length
 
   return (
     <main className="journal-page">
@@ -294,16 +157,18 @@ export default function AdventureJournalPage() {
         <div>
           <h2>Adventure Journal</h2>
           <p>
-            Live session history from the same connected log used by
-            the Dashboard.
+            Permanent PEQL history. Saved adventures remain available
+            even when no game log is connected.
           </p>
           <small className="journal-source">
-            {selectedLog || 'Select an EverQuest Legends log on Dashboard.'}
+            {isConnected
+              ? `Live capture: ${selectedLog}`
+              : 'Offline history mode — no active log required.'}
           </small>
         </div>
 
         <span className={`journal-badge ${isConnected ? 'connected' : ''}`}>
-          {isConnected ? 'Live Session' : 'Not Connected'}
+          {isConnected ? 'Live + Saved' : 'Saved History'}
         </span>
       </header>
 
@@ -340,45 +205,59 @@ export default function AdventureJournalPage() {
 
       <section className="journal-grid">
         <article className="journal-card">
-          <h3>Session Timeline</h3>
+          <h3>Adventure History</h3>
 
-          {visibleEntries.length === 0 ? (
+          {journalMessage && (
             <div className="journal-empty">
               <div>
-                <strong>No matching entries yet</strong>
+                <strong>Journal database unavailable</strong>
+                <p>{journalMessage}</p>
+              </div>
+            </div>
+          )}
+
+          {!journalMessage && visibleEntries.length === 0 ? (
+            <div className="journal-empty">
+              <div>
+                <strong>No matching saved entries yet</strong>
                 <p>
-                  Keep PEQL connected while you play. Zones, instances,
-                  personal kills, loot, level gains, deaths, and OH SHIT
-                  markers will appear here automatically.
+                  Connect an EQL log once and PEQL will import recognized
+                  adventures into its local database. After that, this page
+                  works even when the log is disconnected.
                 </p>
               </div>
             </div>
-          ) : (
+          ) : !journalMessage ? (
             <div className="journal-timeline">
-              {visibleEntries.slice(0, 250).map((entry) => (
-                <div className={`journal-entry entry-${entry.type}`} key={entry.id}>
-                  <time>{entry.timeLabel}</time>
-                  <span className="journal-entry-icon">{entry.icon}</span>
+              {visibleEntries.map((entry) => (
+                <div
+                  className={`journal-entry entry-${entry.entryType}`}
+                  key={entry.id}
+                >
+                  <time>{getTimeLabel(entry.occurredAt)}</time>
+                  <span className="journal-entry-icon">
+                    {getIcon(entry.entryType)}
+                  </span>
                   <div>
                     <strong>{entry.title}</strong>
-                    <p>{entry.detail}</p>
+                    <p>{entry.narrative}</p>
                   </div>
                 </div>
               ))}
             </div>
-          )}
+          ) : null}
         </article>
 
         <aside className="journal-card">
-          <h3>Session Status</h3>
+          <h3>Journal Status</h3>
           <div className="journal-roadmap">
-            <div><span>🔌</span><span><strong>Connection</strong><br />{isConnected ? 'Watching the selected log' : 'No active log watch'}</span></div>
-            <div><span>📄</span><span><strong>Session lines</strong><br />{sessionLines.length.toLocaleString()} lines since New Sesh</span></div>
-            <div><span>🗺️</span><span><strong>Travel context</strong><br />{zoneCount} zone{zoneCount === 1 ? '' : 's'} · {instanceCount} instance{instanceCount === 1 ? '' : 's'} this sesh</span></div>
-            <div><span>⚔️</span><span><strong>Fight details</strong><br />Full DPS snapshots remain on Dashboard</span></div>
+            <div><span>💾</span><span><strong>Persistent history</strong><br />{entries.length.toLocaleString()} saved entries loaded</span></div>
+            <div><span>🔌</span><span><strong>Connection</strong><br />{isConnected ? 'Watching the selected log' : 'Offline browsing available'}</span></div>
+            <div><span>📄</span><span><strong>Live session lines</strong><br />{sessionLines.length.toLocaleString()} lines since New Sesh</span></div>
+            <div><span>🗺️</span><span><strong>Travel history</strong><br />{zoneCount} zone{zoneCount === 1 ? '' : 's'} · {instanceCount} instance{instanceCount === 1 ? '' : 's'} saved</span></div>
             <div><span>⭐</span><span><strong>Boss catalog</strong><br />{databaseStatus?.bossCount.toLocaleString() ?? '...'} named mobs loaded</span></div>
-            <div><span>🗄️</span><span><strong>Journal database</strong><br />{databaseStatus?.ready ? `Schema v${databaseStatus.schemaVersion} ready` : 'Starting local database...'}</span></div>
-            <div><span>🚨</span><span><strong>Combat bookmarks</strong><br />{incidentCount} OH SHIT marker{incidentCount === 1 ? '' : 's'} this sesh</span></div>
+            <div><span>🗄️</span><span><strong>Journal database</strong><br />{databaseStatus?.ready ? `Schema v${databaseStatus.schemaVersion} · ${databaseStatus.journalCount.toLocaleString()} stored` : 'Starting local database...'}</span></div>
+            <div><span>🚨</span><span><strong>Combat bookmarks</strong><br />{incidentCount} saved OH SHIT marker{incidentCount === 1 ? '' : 's'}</span></div>
           </div>
 
           <div className="boss-catalog-tool">

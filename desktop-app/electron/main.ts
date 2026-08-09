@@ -7,8 +7,11 @@ import {
   closeDatabase,
   getDatabaseStatus,
   initializeDatabase,
+  listJournalEntries,
+  saveJournalEntries,
   searchBosses
 } from './database/database'
+import type { JournalEntryInput } from './database/types'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -53,12 +56,22 @@ function createFartMarker(): string {
   return `===== PEQL ==FART== :: ${timestamp} =====`
 }
 
-
 ipcMain.handle('database:status', () => getDatabaseStatus())
 
 ipcMain.handle(
   'bosses:search',
   (_, query: string, zone?: string) => searchBosses(query, zone)
+)
+
+ipcMain.handle(
+  'journal:save',
+  (_, logFilePath: string, entries: JournalEntryInput[]) =>
+    saveJournalEntries(logFilePath, entries)
+)
+
+ipcMain.handle(
+  'journal:list',
+  (_, limit?: number) => listJournalEntries(limit)
 )
 
 ipcMain.handle('external:open', async (_, url: string) => {

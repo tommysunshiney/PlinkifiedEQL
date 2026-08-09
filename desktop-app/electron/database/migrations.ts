@@ -1,5 +1,6 @@
 import type { Database as DatabaseHandle } from 'better-sqlite3'
 import initialSchema from './schema/001_initial_schema.sql?raw'
+import persistentJournal from './schema/002_persistent_journal.sql?raw'
 
 type Migration = {
   version: number
@@ -12,6 +13,11 @@ const migrations: Migration[] = [
     version: 1,
     name: 'initial_schema',
     sql: initialSchema
+  },
+  {
+    version: 2,
+    name: 'persistent_journal',
+    sql: persistentJournal
   }
 ]
 

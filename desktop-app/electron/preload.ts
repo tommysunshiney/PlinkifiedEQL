@@ -1,10 +1,20 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { JournalEntryInput } from './database/types'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getDatabaseStatus: () => ipcRenderer.invoke('database:status'),
 
   searchBosses: (query: string, zone?: string) =>
     ipcRenderer.invoke('bosses:search', query, zone),
+
+  saveJournalEntries: (
+    logFilePath: string,
+    entries: JournalEntryInput[]
+  ): Promise<number> =>
+    ipcRenderer.invoke('journal:save', logFilePath, entries),
+
+  listJournalEntries: (limit?: number) =>
+    ipcRenderer.invoke('journal:list', limit),
 
   openExternal: (url: string): Promise<void> =>
     ipcRenderer.invoke('external:open', url),

@@ -1,12 +1,22 @@
 /// <reference types="vite/client" />
 
-import type { BossRecord, DatabaseStatus } from './types/database'
+import type {
+  BossRecord,
+  DatabaseStatus,
+  JournalEntryInput,
+  JournalRecord
+} from './types/database'
 
 declare global {
   interface Window {
     electronAPI: {
       getDatabaseStatus: () => Promise<DatabaseStatus>
       searchBosses: (query: string, zone?: string) => Promise<BossRecord[]>
+      saveJournalEntries: (
+        logFilePath: string,
+        entries: JournalEntryInput[]
+      ) => Promise<number>
+      listJournalEntries: (limit?: number) => Promise<JournalRecord[]>
       openExternal: (url: string) => Promise<void>
       selectLogFile: () => Promise<string | null>
       readLogFile: (filePath: string) => Promise<string[]>

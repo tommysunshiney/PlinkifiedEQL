@@ -9,6 +9,7 @@ import {
 } from 'react'
 import { FightEngine } from '../fight-engine'
 import type { FightEngineSnapshot } from '../fight-engine'
+import { journalEntriesFromLines } from '../journal/journalEntries'
 
 const SESSION_MARKER = '===== PEQL SESSION START'
 const LAST_LOG_KEY = 'peql:last-selected-log'
@@ -25,6 +26,7 @@ type SessionContextValue = {
   fightState: FightEngineSnapshot
   isConnected: boolean
   connectionError: string
+  journalRevision: number
   selectLog: () => Promise<void>
   reconnectLastLog: () => Promise<void>
   startNewSession: () => Promise<void>
@@ -50,6 +52,7 @@ function getSessionLines(logLines: string[]): string[] {
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const fightEngineRef = useRef(new FightEngine())
+  const selectedLogRef = useRef('')
   const [selectedLog, setSelectedLog] = useState('')
   const [logLines, setLogLines] = useState<string[]>([])
   const [fightState, setFightState] = useState<FightEngineSnapshot>(() =>
@@ -57,12 +60,41 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   )
   const [isConnected, setIsConnected] = useState(false)
   const [connectionError, setConnectionError] = useState('')
+  const [journalRevision, setJournalRevision] = useState(0)
+
+  async function persistJournalLines(
+    filePath: string,
+    lines: string[]
+  ) {
+    if (!filePath || lines.length === 0) return
+
+    const entries = journalEntriesFromLines(lines)
+    if (entries.length === 0) return
+
+    try {
+      const inserted = await window.electronAPI.saveJournalEntries(
+        filePath,
+        entries
+      )
+
+      if (inserted > 0) {
+        setJournalRevision((revision) => revision + inserted)
+      }
+    } catch (error) {
+      console.error('Unable to save Adventure Journal entries:', error)
+    }
+  }
 
   useEffect(() => {
     window.electronAPI.onLogLines((newLines) => {
       setLogLines((currentLines) => [...currentLines, ...newLines])
       fightEngineRef.current.ingestLines(newLines)
       setFightState(fightEngineRef.current.snapshot())
+
+      const filePath = selectedLogRef.current
+      if (filePath) {
+        void persistJournalLines(filePath, newLines)
+      }
     })
   }, [])
 
@@ -86,12 +118,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     fightEngineRef.current.reset()
     fightEngineRef.current.ingestLines(getSessionLines(lines))
 
+    selectedLogRef.current = filePath
     setSelectedLog(filePath)
     setLogLines(lines)
     setFightState(fightEngineRef.current.snapshot())
     setIsConnected(true)
     setConnectionError('')
     window.localStorage.setItem(LAST_LOG_KEY, filePath)
+
+    void persistJournalLines(filePath, lines)
   }
 
   async function selectLog() {
@@ -144,6 +179,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     fightEngineRef.current.ingestLines(getSessionLines(lines))
     setLogLines(lines)
     setFightState(fightEngineRef.current.snapshot())
+
+    void persistJournalLines(selectedLog, lines)
   }
 
   async function markOhShit(): Promise<MarkerResult> {
@@ -163,6 +200,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         fightState,
         isConnected,
         connectionError,
+        journalRevision,
         selectLog,
         reconnectLastLog,
         startNewSession,
