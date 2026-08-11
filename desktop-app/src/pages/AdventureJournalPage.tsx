@@ -206,7 +206,6 @@ export default function AdventureJournalPage() {
     isConnected,
     journalRevision,
     encounterRevision,
-    fightState
   } = useSession()
 
   async function refreshJournal() {
@@ -265,16 +264,6 @@ export default function AdventureJournalPage() {
       setBossSearchMessage('Boss search failed.')
     }
   }
-
-  const latestZoneName = useMemo(() => {
-    return (
-      entries.find(
-        (entry) =>
-          (entry.entryType === 'zone' || entry.entryType === 'instance') &&
-          entry.zoneName
-      )?.zoneName ?? null
-    )
-  }, [entries])
 
   const visibleEntries = useMemo(() => {
     if (activeFilter === 'all') return entries

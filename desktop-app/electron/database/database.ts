@@ -385,7 +385,8 @@ export function saveEncounters(
       best_hit,
       zone_detail,
       actions_json,
-      mob_breakdown_json
+      mob_breakdown_json,
+      ability_breakdown_json
     ) VALUES (
       @sessionId,
       @zoneName,
@@ -408,7 +409,8 @@ export function saveEncounters(
       @bestHit,
       @zoneDetail,
       @actionsJson,
-      @mobBreakdownJson
+      @mobBreakdownJson,
+      @abilityBreakdownJson
     )
   `)
 
@@ -428,6 +430,18 @@ export function saveEncounters(
       AND LOWER(COALESCE(zone_name, '')) = LOWER(COALESCE(?, ''))
       AND ended_at = ?
     ORDER BY total_damage DESC, duration_ms DESC, id ASC
+  `)
+
+  const findEncounterBySourceKey = database.prepare(`
+    SELECT
+      id,
+      duration_ms,
+      total_damage,
+      actions_json
+    FROM encounters
+    WHERE session_id = ?
+      AND source_key = ?
+    LIMIT 1
   `)
 
   const updateEncounter = database.prepare(`
@@ -451,7 +465,8 @@ export function saveEncounters(
       best_hit = @bestHit,
       zone_detail = @zoneDetail,
       actions_json = @actionsJson,
-      mob_breakdown_json = @mobBreakdownJson
+      mob_breakdown_json = @mobBreakdownJson,
+      ability_breakdown_json = @abilityBreakdownJson
     WHERE id = @id
   `)
 
@@ -513,7 +528,55 @@ export function saveEncounters(
         bestHit: encounter.bestHit,
         zoneDetail: encounter.zoneDetail ?? null,
         actionsJson: JSON.stringify(encounter.actions),
-        mobBreakdownJson: JSON.stringify(encounter.mobs)
+        mobBreakdownJson: JSON.stringify(encounter.mobs),
+        abilityBreakdownJson: JSON.stringify(encounter.abilities)
+      }
+
+      // Source-key identity is authoritative. On startup/replay the same
+      // completed encounter may be reconstructed again. Update that exact
+      // row in place before trying fuzzy same-NPC/same-end reconciliation;
+      // otherwise fuzzy reconciliation can try to assign a source_key that
+      // another row already owns and violate the unique constraint.
+      const exactSource = findEncounterBySourceKey.get(
+        sessionId,
+        encounter.sourceKey
+      ) as
+        | {
+            id: number
+            duration_ms: number
+            total_damage: number
+            actions_json: string | null
+          }
+        | undefined
+
+      if (exactSource) {
+        let existingActionCount = 0
+        try {
+          existingActionCount = JSON.parse(
+            exactSource.actions_json ?? '[]'
+          ).length
+        } catch {
+          existingActionCount = 0
+        }
+
+        const incomingScore =
+          encounter.totalDamage * 1000 +
+          encounter.durationMs +
+          encounter.actions.length
+        const existingScore =
+          Number(exactSource.total_damage ?? 0) * 1000 +
+          Number(exactSource.duration_ms ?? 0) +
+          existingActionCount
+
+        if (mode === 'replay' || incomingScore > existingScore) {
+          updateEncounter.run({
+            ...payload,
+            id: exactSource.id
+          })
+          changed += 1
+        }
+
+        continue
       }
 
       // Hot reloads or reconnects can occasionally produce a short partial
@@ -640,6 +703,7 @@ export function listEncounters(limit = 500): EncounterRecord[] {
 
     let actions = []
     let mobs = []
+    let abilities = []
     try {
       actions = JSON.parse(String(value.actions_json ?? '[]'))
     } catch {
@@ -647,9 +711,10 @@ export function listEncounters(limit = 500): EncounterRecord[] {
     }
     try {
       mobs = JSON.parse(String(value.mob_breakdown_json ?? '[]'))
-    } catch {
-      mobs = []
-    }
+    } catch { mobs = [] }
+    try {
+      abilities = JSON.parse(String(value.ability_breakdown_json ?? '[]'))
+    } catch { abilities = [] }
 
     return {
       id: Number(value.id),
@@ -672,6 +737,7 @@ export function listEncounters(limit = 500): EncounterRecord[] {
       outcome: value.outcome === 'victory' ? 'victory' : 'failed',
       actions,
       mobs,
+      abilities,
       attemptNumber: Number(value.attempt_number ?? 1),
       namedMobId: value.primary_named_mob_id
         ? Number(value.primary_named_mob_id)

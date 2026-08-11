@@ -24,13 +24,34 @@ export type DamageSource =
 
 export type CombatantType = 'player' | 'pet'
 
+export type CriticalType =
+  | 'critical'
+  | 'crippling-blow'
+  | 'lucky-critical'
+  | 'finishing-blow'
+
 export type FightDamageEvent = {
   timestamp: number
   damage: number
   target: string
   source: DamageSource
+  ability: string | null
+  critical: CriticalType | null
+  modifier: string | null
   actor: string
   actorType: CombatantType
+}
+
+export type FightAbilitySnapshot = {
+  ability: string
+  source: DamageSource
+  actor: string
+  actorType: CombatantType
+  damage: number
+  hits: number
+  criticalHits: number
+  bestHit: number
+  modifiers: Record<string, number>
 }
 
 export type FightCombatantSnapshot = {
@@ -79,6 +100,7 @@ export type FightSnapshot = {
   playerDamage: number
   petDamage: number
   combatants: FightCombatantSnapshot[]
+  abilities: FightAbilitySnapshot[]
   mobs: FightMobSnapshot[]
   fightDps: number
   rollingDps: number

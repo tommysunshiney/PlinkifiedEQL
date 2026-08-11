@@ -1,4 +1,4 @@
-﻿import {
+import {
   useEffect,
   useMemo,
   useRef,
@@ -28,6 +28,10 @@ const ALARM_SOUND_DATA_KEY = 'peql:auto-attack-alarm-data'
 const ALARM_SOUND_NAME_KEY = 'peql:auto-attack-alarm-name'
 const ALARM_ENABLED_KEY = 'peql:auto-attack-alarm-enabled'
 
+const DASH_TRIGGERED=new Set(['ykesha','blood siphon strike','blood draw strike','asp venom strike','cobra venom strike','weakening strike','hobbling strike','befuddling strike','concussive strike','clumsiness strike','banishing strike'])
+const DASH_SPECIAL=new Set(['backstab','bash','kick','reave','slam','frenzy','gore','smash','rend','sting','maul','bite','claw'])
+function dashboardAbilityCategory(a:{ability:string;source:string;actorType:string}){const n=a.ability.trim().toLowerCase();if(a.actorType==='pet')return'Pet';if(DASH_TRIGGERED.has(n))return'Triggered';if(a.source==='melee'&&DASH_SPECIAL.has(n))return'Special';if(a.source==='melee')return'Melee';if(a.source==='dot')return'DoT';if(a.source==='damage-shield')return'Damage Shield';return'Spell / Effect'}
+
 function isOwnSpellLine(line: string): boolean {
   return /\]\s+(?:You begin casting|You cast|Your .+ spell|You have finished memorizing|You have finished scribing|You forget )/i.test(line)
 }
@@ -46,6 +50,7 @@ export default function DashboardPage() {
   } = useSession()
 
   const [selectedFightIndex, setSelectedFightIndex] = useState<number | null>(null)
+  const [isSelectingLog, setIsSelectingLog] = useState(false)
   const [ohShitStatus, setOhShitStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle')
   const [ohShitToast, setOhShitToast] = useState('')
   const [alarmSoundUrl, setAlarmSoundUrl] = useState(
@@ -59,14 +64,22 @@ export default function DashboardPage() {
   )
 
   const logOutputRef = useRef<HTMLDivElement>(null)
+  const selectingLogRef = useRef(false)
   const activeFightIdRef = useRef<string | null>(null)
   const ohShitResetTimerRef = useRef<number | null>(null)
   const autoAttackAudioRef = useRef<HTMLAudioElement | null>(null)
   const fartMarkerWrittenRef = useRef(false)
   const alarmSoundInputRef = useRef<HTMLInputElement>(null)
 
-  const parsedEvents = useMemo(
-    () => sessionLines.map((line) => parseLine(line)),
+  const visibleParsedEvents = useMemo(
+    () =>
+      sessionLines
+        .slice(-MAX_VISIBLE_LOG_LINES)
+        .map((line) => parseLine(line))
+        .filter(
+          (event) =>
+            !/\]\s+Auto attack is (?:on|off)\./i.test(event.text)
+        ),
     [sessionLines]
   )
 
@@ -111,23 +124,53 @@ export default function DashboardPage() {
     if (output) output.scrollTop = output.scrollHeight
   }, [logLines])
 
-  const categoryCounts = useMemo(() => {
-    const counts: Record<EventType, number> = {
-      xp: 0,
-      loot: 0,
-      kill: 0,
-      death: 0,
-      spell: 0,
-      combat: 0,
-      system: 0,
-      tell: 0,
-      other: 0
-    }
+  const emptyCategoryCounts = (): Record<EventType, number> => ({
+    xp: 0,
+    loot: 0,
+    kill: 0,
+    death: 0,
+    spell: 0,
+    combat: 0,
+    system: 0,
+    tell: 0,
+    other: 0
+  })
 
-    for (const event of parsedEvents) counts[event.type] += 1
-    counts.spell = sessionLines.filter(isOwnSpellLine).length
-    return counts
-  }, [parsedEvents, sessionLines])
+  const [categoryCounts, setCategoryCounts] = useState<Record<EventType, number>>(
+    () => emptyCategoryCounts()
+  )
+  const countedSessionLengthRef = useRef(0)
+
+  useEffect(() => {
+    const previousLength = countedSessionLengthRef.current
+    const mustRebuild =
+      previousLength === 0 ||
+      sessionLines.length < previousLength
+
+    const startIndex = mustRebuild ? 0 : previousLength
+    const additions = sessionLines.slice(startIndex)
+
+    if (additions.length === 0 && !mustRebuild) return
+
+    setCategoryCounts((current) => {
+      const next = mustRebuild
+        ? emptyCategoryCounts()
+        : { ...current }
+
+      for (const line of additions) {
+        const event = parseLine(line)
+        next[event.type] += 1
+      }
+
+      next.spell = mustRebuild
+        ? sessionLines.filter(isOwnSpellLine).length
+        : next.spell + additions.filter(isOwnSpellLine).length
+
+      return next
+    })
+
+    countedSessionLengthRef.current = sessionLines.length
+  }, [sessionLines])
 
   const levelsEarned = useMemo(
     () => sessionLines.filter((line) =>
@@ -209,6 +252,11 @@ export default function DashboardPage() {
   const dpsBarPercent = Math.min(100, Math.max(0, (dpsBarValue / dpsBarCeiling) * 100))
 
   async function handleSelectLog() {
+    if (selectingLogRef.current) return
+
+    selectingLogRef.current = true
+    setIsSelectingLog(true)
+
     try {
       await selectLog()
       setSelectedFightIndex(null)
@@ -216,6 +264,9 @@ export default function DashboardPage() {
     } catch (error) {
       console.error(error)
       alert('Unable to connect to that log file.')
+    } finally {
+      selectingLogRef.current = false
+      setIsSelectingLog(false)
     }
   }
 
@@ -254,7 +305,7 @@ export default function DashboardPage() {
       const result = await markOhShit()
       const markerTime = result.marker.match(/(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/)?.[1]
       setOhShitStatus('success')
-      setOhShitToast(markerTime ? `OH SHIT marker added Â· ${markerTime}` : 'OH SHIT marker added')
+      setOhShitToast(markerTime ? `OH SHIT marker added · ${markerTime}` : 'OH SHIT marker added')
       ohShitResetTimerRef.current = window.setTimeout(() => {
         setOhShitStatus('idle')
         setOhShitToast('')
@@ -275,9 +326,6 @@ export default function DashboardPage() {
   const visibleCategories: EventType[] = [
     'xp', 'loot', 'kill', 'death', 'spell', 'combat', 'system', 'tell'
   ]
-  const visibleParsedEvents = parsedEvents
-    .filter((event) => !/\]\s+Auto attack is (?:on|off)\./i.test(event.text))
-    .slice(-MAX_VISIBLE_LOG_LINES)
 
   const engineAutoAttackWarning = fightState.combatState.autoAttackWarning
   const autoAttackWarning = alarmEnabled && engineAutoAttackWarning
@@ -315,6 +363,7 @@ export default function DashboardPage() {
     }
   }, [alarmSoundUrl, autoAttackWarning, selectedLog])
 
+  const displayedAbilityRows = displayedFight?.abilities.slice().sort((a,b)=>b.damage-a.damage) ?? []
   const petCombatants = displayedFight?.combatants.filter((combatant) => combatant.type === 'pet') ?? []
   const petLabel = petCombatants.length === 1 ? petCombatants[0].name : 'Pet(s)'
 
@@ -339,13 +388,17 @@ export default function DashboardPage() {
 
         {autoAttackWarning && (
           <div className="autoattack-warning" role="alert">
-            âš  AUTO ATTACK IS NOT ON â€” SWING, PECK!
+            ⚠ AUTO ATTACK IS NOT ON — SWING, PECK!
           </div>
         )}
 
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-          <button className="select-button" onClick={handleSelectLog}>
-            Select EQL Log File
+          <button
+            className="select-button"
+            onClick={handleSelectLog}
+            disabled={isSelectingLog}
+          >
+            {isSelectingLog ? 'Selecting Log...' : 'Select EQL Log File'}
           </button>
 
           <input
@@ -389,9 +442,9 @@ export default function DashboardPage() {
             {ohShitStatus === 'saving'
               ? 'MARKING...'
               : ohShitStatus === 'success'
-                ? 'âœ“ MARKED!'
+                ? '✓ MARKED!'
                 : ohShitStatus === 'error'
-                  ? 'âœ• TRY AGAIN'
+                  ? '✕ TRY AGAIN'
                   : 'OH SHIT!'}
           </button>
         </div>
@@ -400,7 +453,7 @@ export default function DashboardPage() {
           <div className={`peql-toast toast-${ohShitStatus}`} role="status" aria-live="polite">
             <strong>
               {ohShitStatus === 'success'
-                ? 'ðŸš¨ Combat bookmark recorded'
+                ? '🚨 Combat bookmark recorded'
                 : ohShitStatus === 'error'
                   ? 'Marker failed'
                   : 'Recording marker'}
@@ -424,7 +477,7 @@ export default function DashboardPage() {
             {selectedLog ? selectedLog.split(/[\\/]/).pop() : 'No log file selected.'}
           </span>
           <span className="log-line-counts">
-            {logLines.length.toLocaleString()} total Â· {sessionLines.length.toLocaleString()} this sesh
+            {logLines.length.toLocaleString()} recent lines loaded
           </span>
           <span className="alarm-sound-name" title={alarmSoundName}>
             Alarm: {alarmEnabled ? alarmSoundName : 'OFF'}
@@ -451,13 +504,13 @@ export default function DashboardPage() {
               disabled={!canGoOlder}
               title="Previous fight"
               style={{ minWidth: '44px', opacity: canGoOlder ? 1 : 0.45 }}
-            >â—€</button>
+            >◀</button>
 
             <strong style={{ textAlign: 'center', flex: 1 }}>
               {fightHistory.length === 0
                 ? 'No fights recorded'
                 : isViewingLive
-                  ? `Live Â· Fight ${displayedFightNumber} of ${fightHistory.length}`
+                  ? `Live · Fight ${displayedFightNumber} of ${fightHistory.length}`
                   : `Fight ${displayedFightNumber} of ${fightHistory.length}`}
             </strong>
 
@@ -467,7 +520,7 @@ export default function DashboardPage() {
               disabled={!canGoNewer}
               title="Next fight"
               style={{ minWidth: '44px', opacity: canGoNewer ? 1 : 0.45 }}
-            >â–¶</button>
+            >▶</button>
           </div>
 
           <div className="dps-heading">
@@ -475,7 +528,7 @@ export default function DashboardPage() {
               <span className="dps-label">
                 {isViewingLive ? 'CURRENT FIGHT' : 'FIGHT HISTORY'}
                 {displayedFight?.target && (
-                  <strong className="fight-target"> Â· {displayedFight.target}</strong>
+                  <strong className="fight-target"> · {displayedFight.target}</strong>
                 )}
               </span>
               <strong className="dps-value">
@@ -505,6 +558,7 @@ export default function DashboardPage() {
             <div><span>Duration</span><strong>{(displayedFight?.durationSeconds ?? 0).toFixed(1)}s</strong></div>
             <div><span>Levels Earned</span><strong>{levelsEarned}</strong></div>
           </div>
+          {displayedAbilityRows.length>0&&<div className="fight-details-analytics"><div className="fight-details-heading"><div><strong>Fight Details</strong><span>Damage by ability / triggered effect</span></div><span>{displayedAbilityRows.length} sources</span></div><div className="fight-ability-list">{displayedAbilityRows.slice(0,12).map(x=>{const pct=(displayedFight?.totalDamage??0)>0?x.damage/(displayedFight?.totalDamage??1)*100:0;const cat=dashboardAbilityCategory(x);return <div className="fight-ability-row" key={x.actorType+'-'+x.actor+'-'+x.source+'-'+x.ability}><div className="fight-ability-main"><strong>{x.ability}</strong><span>{cat}{x.actorType==='pet'?' · '+x.actor:''}</span></div><div className="fight-ability-numbers"><strong>{x.damage.toLocaleString()}</strong><span>{x.hits} {cat==='Triggered'?'triggers':'hits'}{x.criticalHits?' · '+x.criticalHits+' crit'+(x.criticalHits===1?'':'s'):''} · {pct.toFixed(1)}%</span></div></div>})}</div></div>}
         </section>
 
         <div className="log-output" ref={logOutputRef}>

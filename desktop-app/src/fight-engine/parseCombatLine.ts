@@ -1,5 +1,6 @@
 import type {
   CombatantType,
+  CriticalType,
   DamageSource,
   FightDamageEvent
 } from './types.ts'
@@ -24,6 +25,44 @@ export type CombatLogEvent =
   | { kind: 'enemy-spell-interrupt'; timestamp: number; caster: string; spell: string }
   | { kind: 'pet-identity'; timestamp: number; pet: string }
 
+const MELEE_VERBS =
+  '(?:hit(?:s)?|slash(?:es)?|pierc(?:e|es)|crush(?:es)?|punch(?:es)?|' +
+  'kick(?:s)?|bash(?:es)?|cleav(?:e|es)|backstab(?:s)?|reav(?:e|es)|' +
+  'maul(?:s)?|bit(?:e|es)|claw(?:s)?|strik(?:e|es)|slam(?:s)?|' +
+  'gor(?:e|es)|smash(?:es)?|rend(?:s)?|sting(?:s)?|frenz(?:y|ies))'
+
+function titleCaseAbility(value: string): string {
+  return value
+    .trim()
+    .replace(/ies$/i, 'y')
+    .replace(/es$/i, '')
+    .replace(/s$/i, '')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
+function normalizeModifier(value: string | undefined): string | null {
+  if (!value) return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function criticalType(value: string | undefined): CriticalType | null {
+  if (!value) return null
+
+  switch (value.toLowerCase()) {
+    case 'critical':
+      return 'critical'
+    case 'crippling blow':
+      return 'crippling-blow'
+    case 'lucky critical':
+      return 'lucky-critical'
+    case 'finishing blow':
+      return 'finishing-blow'
+    default:
+      return null
+  }
+}
+
 function cleanName(value: string): string {
   return value.trim().replace(/[.!]+$/, '').trim()
 }
@@ -42,13 +81,19 @@ function damageEvent(
   timestamp: number,
   source: DamageSource,
   actor: string,
-  actorType: CombatantType
+  actorType: CombatantType,
+  ability: string | null = null,
+  critical: CriticalType | null = null,
+  modifier: string | null = null
 ): FightDamageEvent {
   return {
     timestamp,
     target: cleanName(match[1]),
     damage: Number(match[2]),
     source,
+    ability,
+    critical,
+    modifier,
     actor,
     actorType
   }
@@ -136,58 +181,123 @@ export function parseCombatLine(line: string): CombatLogEvent | null {
     }
   }
 
+  // Specific spell forms must run before generic melee. "You hit X for N
+  // points of magic damage by Spell" otherwise looks like a melee hit.
   match = line.match(
-    /\]\s+You\s+(?:hit|slash|pierce|crush|punch|kick|bash|cleave|backstab|reave|maul|bite|claw|strike)\s+(.+?)\s+for\s+(\d+)\s+points?(?:\s+of\s+(?:[\w-]+\s+)?)?damage/i
+    /\]\s+You hit\s+(.+?)\s+for\s+(\d+)\s+points?\s+of\s+[\w-]+\s+damage\s+by\s+(.+?)\.(?:\s+\(([^()]+)\))?\s*$/i
   )
   if (match) {
     return {
       kind: 'player-damage',
-      ...damageEvent(match, timestamp, 'melee', 'You', 'player')
+      ...damageEvent(
+        match,
+        timestamp,
+        'spell',
+        'You',
+        'player',
+        match[3].trim(),
+        criticalType(match[4]),
+        normalizeModifier(match[4])
+      )
     }
   }
 
   match = line.match(
-    /\]\s+You hit\s+(.+?)\s+for\s+(\d+)\s+points?\s+of\s+[\w-]+\s+damage\s+by\s+/i
+    /\]\s+You hit\s+(.+?)\s+for\s+(\d+)\s+points?\s+of\s+non-melee damage\.(?:\s+\(([^()]+)\))?\s*$/i
   )
   if (match) {
     return {
       kind: 'player-damage',
-      ...damageEvent(match, timestamp, 'spell', 'You', 'player')
+      ...damageEvent(
+        match,
+        timestamp,
+        'spell',
+        'You',
+        'player',
+        'Unknown spell',
+        criticalType(match[3]),
+        normalizeModifier(match[3])
+      )
     }
   }
 
   match = line.match(
-    /\]\s+(.+?)\s+has taken\s+(\d+)\s+damage from your\s+/i
+    /\]\s+(.+?)\s+has taken\s+(\d+)\s+damage from your\s+(.+?)\.(?:\s+\(([^()]+)\))?\s*$/i
   )
   if (match) {
     return {
       kind: 'player-damage',
-      ...damageEvent(match, timestamp, 'dot', 'You', 'player')
+      ...damageEvent(
+        match,
+        timestamp,
+        'dot',
+        'You',
+        'player',
+        match[3].trim(),
+        criticalType(match[4])
+      )
     }
   }
 
   match = line.match(
-    /\]\s+(.+?)\s+is pierced by YOUR thorns for\s+(\d+)\s+points?\s+of non-melee damage/i
+    /\]\s+(.+?)\s+is\s+.+?\s+by YOUR\s+(.+?)\s+for\s+(\d+)\s+points?\s+of non-melee damage\.\s*$/i
   )
   if (match) {
     return {
       kind: 'player-damage',
-      ...damageEvent(match, timestamp, 'damage-shield', 'You', 'player')
+      timestamp,
+      target: cleanName(match[1]),
+      damage: Number(match[3]),
+      source: 'damage-shield',
+      ability: match[2].trim(),
+      critical: null,
+      modifier: null,
+      actor: 'You',
+      actorType: 'player'
     }
   }
 
   match = line.match(
-    /\]\s+You try to (?:hit|slash|pierce|crush|punch|kick|bash|cleave|backstab|reave|maul|bite|claw|strike)\s+(.+?),?\s+but (?:miss|.+?\s+(?:dodges|parries|blocks))/i
+    new RegExp(
+      '\\]\\s+You\\s+(' + MELEE_VERBS + ')' +
+      '(?:\\s+on)?\\s+(.+?)\\s+for\\s+(\\d+)\\s+points?' +
+      '(?:\\s+of\\s+(?:[\\w-]+\\s+)?)?damage\\.' +
+      '(?:\\s+\\(([^()]+)\\))?' +
+      '\\s*$',
+      'i'
+    )
+  )
+  if (match) {
+    return {
+      kind: 'player-damage',
+      timestamp,
+      target: cleanName(match[2]),
+      damage: Number(match[3]),
+      source: 'melee',
+      ability: titleCaseAbility(match[1]),
+      critical: criticalType(match[4]),
+      modifier: normalizeModifier(match[4]),
+      actor: 'You',
+      actorType: 'player'
+    }
+  }
+
+  match = line.match(
+    new RegExp(
+      '\\]\\s+You try to ' + MELEE_VERBS +
+      '(?:\\s+on)?\\s+(.+?),?\\s+but (?:miss|.+?\\s+(?:dodges|parries|blocks))',
+      'i'
+    )
   )
   if (!match) match = line.match(/\]\s+You miss\s+(.+?)[.!]?$/i)
   if (match) {
     return { kind: 'player-miss', timestamp, target: cleanName(match[1]) }
   }
 
-  // Generic actor spell damage. The FightEngine only accepts it if the actor
-  // has been positively identified as the player's pet.
+  // Generic actor spell/DoT/melee damage. FightEngine accepts outgoing
+  // attribution only after the actor is positively identified as our pet.
   match = line.match(
-    /\]\s+(.+?) hit\s+(.+?)\s+for\s+(\d+)\s+points?\s+of\s+[\w-]+\s+damage\s+by\s+/i
+    /\]\s+(.+?) hit\s+(.+?)\s+for\s+(\d+)\s+points?\s+of\s+[\w-]+\s+damage\s+by\s+(.+?)\.(?:\s+\(([^()]+)\))?\s*$/i
   )
   if (match && !/^you$/i.test(match[1])) {
     return {
@@ -197,27 +307,58 @@ export function parseCombatLine(line: string): CombatLogEvent | null {
       actorType: 'pet',
       target: cleanName(match[2]),
       damage: Number(match[3]),
-      source: 'spell'
+      source: 'spell',
+      ability: match[4].trim(),
+      critical: criticalType(match[5]),
+      modifier: normalizeModifier(match[5])
     }
   }
 
   match = line.match(
-    /\]\s+(.+?)\s+(?:hits|slashes|pierces|crushes|punches|kicks|bashes|cleaves|backstabs|reaves|mauls|bites|claws|strikes)\s+(.+?)\s+for\s+(\d+)\s+points?(?:\s+of\s+(?:[\w-]+\s+)?)?damage/i
+    /\]\s+(.+?)\s+has taken\s+(\d+)\s+damage from\s+(.+?)\s+by\s+(.+?)\.(?:\s+\(([^()]+)\))?\s*$/i
   )
-  if (match && !/^you$/i.test(match[1]) && !/^YOU$/i.test(match[2])) {
+  if (match && !/^you$/i.test(match[4])) {
+    return {
+      kind: 'actor-damage',
+      timestamp,
+      actor: cleanName(match[4]),
+      actorType: 'pet',
+      target: cleanName(match[1]),
+      damage: Number(match[2]),
+      source: 'dot',
+      ability: match[3].trim(),
+      critical: criticalType(match[5]),
+      modifier: normalizeModifier(match[5])
+    }
+  }
+
+  match = line.match(
+    new RegExp(
+      '\\]\\s+(.+?)\\s+(' + MELEE_VERBS + ')' +
+      '(?:\\s+on)?\\s+(.+?)\\s+for\\s+(\\d+)\\s+points?' +
+      '(?:\\s+of\\s+(?:[\\w-]+\\s+)?)?damage\\.' +
+      '(?:\\s+\\(([^()]+)\\))?' +
+      '\\s*$',
+      'i'
+    )
+  )
+  if (match && !/^you$/i.test(match[1]) && !/^YOU$/i.test(match[3])) {
     return {
       kind: 'actor-damage',
       timestamp,
       actor: cleanName(match[1]),
       actorType: 'pet',
-      target: cleanName(match[2]),
-      damage: Number(match[3]),
-      source: 'melee'
+      target: cleanName(match[3]),
+      damage: Number(match[4]),
+      source: 'melee',
+      ability: titleCaseAbility(match[2]),
+      critical: criticalType(match[5]),
+      modifier: normalizeModifier(match[5])
     }
   }
 
   match = line.match(
-    /\]\s+(.+?)\s+is pierced by\s+(.+?)'s thorns for\s+(\d+)\s+points?\s+of non-melee damage/i
+    /\]\s+(.+?)\s+is\s+.+?\s+by\s+(.+?)'s\s+(.+?)\s+for\s+(\d+)\s+points?\s+of non-melee damage\.\s*$/i
   )
   if (match && !/^YOUR$/i.test(match[2])) {
     return {
@@ -226,8 +367,11 @@ export function parseCombatLine(line: string): CombatLogEvent | null {
       actor: cleanName(match[2]),
       actorType: 'pet',
       target: cleanName(match[1]),
-      damage: Number(match[3]),
-      source: 'damage-shield'
+      damage: Number(match[4]),
+      source: 'damage-shield',
+      ability: match[3].trim(),
+      critical: null,
+      modifier: null
     }
   }
 

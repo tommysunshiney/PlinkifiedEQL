@@ -61,6 +61,17 @@ export type EncounterAction = {
 }
 
 
+export type EncounterAbilityBreakdown = {
+  ability: string
+  source: 'melee' | 'spell' | 'dot' | 'damage-shield'
+  actor: string
+  actorType: 'player' | 'pet'
+  damage: number
+  hits: number
+  criticalHits: number
+  bestHit: number
+}
+
 export type EncounterBurnSegment = {
   startedOffsetMs: number
   endedOffsetMs: number
@@ -92,6 +103,7 @@ export type EncounterInput = {
   primaryNpcName: string
   targetNames?: string[]
   mobs: EncounterMobBreakdown[]
+  abilities: EncounterAbilityBreakdown[]
   zoneName?: string
   zoneDetail?: string
   startedAt: string

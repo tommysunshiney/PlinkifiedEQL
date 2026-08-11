@@ -481,3 +481,173 @@ test('prefers a real NPC over its pet for the encounter title', () => {
   const fight = engine.snapshot(start + 5_000).fights[0]
   assert.match(fight.target, /^Hoptor Thaggelum \+/)
 })
+
+
+test('classifies named direct spell damage before generic melee hit', () => {
+  const event = parseCombatLine(
+    line(0, 'You hit a ghoul for 147 points of magic damage by Smiting Strike.')
+  )
+
+  assert.equal(event?.kind, 'player-damage')
+  if (event?.kind === 'player-damage') {
+    assert.equal(event.source, 'spell')
+    assert.equal(event.ability, 'Smiting Strike')
+    assert.equal(event.damage, 147)
+  }
+})
+
+test('preserves player melee ability and critical type', () => {
+  const event = parseCombatLine(
+    line(0, 'You pierce a ghoul for 100 points of damage. (Critical)')
+  )
+
+  assert.equal(event?.kind, 'player-damage')
+  if (event?.kind === 'player-damage') {
+    assert.equal(event.source, 'melee')
+    assert.equal(event.ability, 'Pierce')
+    assert.equal(event.critical, 'critical')
+  }
+})
+
+test('recognizes expanded melee verbs', () => {
+  const smash = parseCombatLine(
+    line(0, 'You smash a ghoul for 81 points of damage.')
+  )
+  const gore = parseCombatLine(
+    line(1, 'You gore a ghoul for 92 points of damage.')
+  )
+
+  assert.equal(smash?.kind, 'player-damage')
+  assert.equal(gore?.kind, 'player-damage')
+})
+
+test('preserves player DOT spell name', () => {
+  const event = parseCombatLine(
+    line(0, 'A ghoul has taken 53 damage from your Immolate.')
+  )
+
+  assert.equal(event?.kind, 'player-damage')
+  if (event?.kind === 'player-damage') {
+    assert.equal(event.source, 'dot')
+    assert.equal(event.ability, 'Immolate')
+  }
+})
+
+test('attributes known pet DOT damage', () => {
+  const engine = new FightEngine()
+
+  engine.ingestLines([
+    line(0, "Jann told you, 'Attacking a ghoul Master.'"),
+    line(1, 'A ghoul has taken 44 damage from Burning Affliction by Jann.'),
+    line(2, 'You have slain a ghoul!')
+  ])
+
+  const fight = engine.snapshot(start + 2_000).fights[0]
+  assert.equal(fight.petDamage, 44)
+
+  const ability = fight.abilities.find(
+    (item) => item.actor === 'Jann' && item.ability === 'Burning Affliction'
+  )
+  assert.ok(ability)
+  assert.equal(ability.source, 'dot')
+  assert.equal(ability.damage, 44)
+})
+
+test('builds per-ability damage breakdown for loadout analysis', () => {
+  const engine = new FightEngine()
+
+  engine.ingestLines([
+    line(0, 'You backstab a ghoul for 200 points of damage.'),
+    line(1, 'You backstab a ghoul for 300 points of damage. (Critical)'),
+    line(2, 'You hit a ghoul for 100 points of magic damage by Smiting Strike.'),
+    line(3, 'You have slain a ghoul!')
+  ])
+
+  const fight = engine.snapshot(start + 3_000).fights[0]
+  const backstab = fight.abilities.find(
+    (item) => item.actorType === 'player' && item.ability === 'Backstab'
+  )
+  const proc = fight.abilities.find(
+    (item) => item.actorType === 'player' && item.ability === 'Smiting Strike'
+  )
+
+  assert.ok(backstab)
+  assert.equal(backstab.damage, 500)
+  assert.equal(backstab.hits, 2)
+  assert.equal(backstab.criticalHits, 1)
+  assert.equal(backstab.bestHit, 300)
+
+  assert.ok(proc)
+  assert.equal(proc.source, 'spell')
+  assert.equal(proc.damage, 100)
+})
+
+
+test('parses Slay Undead damage without dropping the hit', () => {
+  const event = parseCombatLine(
+    line(0, 'You backstab a yun ghoul wizard for 1159 points of damage. (Slay Undead)')
+  )
+
+  assert.equal(event?.kind, 'player-damage')
+  if (event?.kind === 'player-damage') {
+    assert.equal(event.source, 'melee')
+    assert.equal(event.ability, 'Backstab')
+    assert.equal(event.damage, 1159)
+    assert.equal(event.modifier, 'Slay Undead')
+    assert.equal(event.critical, null)
+  }
+})
+
+test('parses Riposte-tagged outgoing damage without dropping the hit', () => {
+  const event = parseCombatLine(
+    line(0, 'You slash a dar ghoul knight for 28 points of damage. (Riposte)')
+  )
+
+  assert.equal(event?.kind, 'player-damage')
+  if (event?.kind === 'player-damage') {
+    assert.equal(event.source, 'melee')
+    assert.equal(event.ability, 'Slash')
+    assert.equal(event.damage, 28)
+    assert.equal(event.modifier, 'Riposte')
+    assert.equal(event.critical, null)
+  }
+})
+
+test('preserves an unknown future damage modifier instead of dropping damage', () => {
+  const event = parseCombatLine(
+    line(0, 'You pierce a ghoul for 222 points of damage. (Some Future EQL Modifier)')
+  )
+
+  assert.equal(event?.kind, 'player-damage')
+  if (event?.kind === 'player-damage') {
+    assert.equal(event.damage, 222)
+    assert.equal(event.ability, 'Pierce')
+    assert.equal(event.modifier, 'Some Future EQL Modifier')
+    assert.equal(event.critical, null)
+  }
+})
+
+test('ability breakdown counts modifiers independently from crits', () => {
+  const engine = new FightEngine()
+
+  engine.ingestLines([
+    line(0, 'You backstab a ghoul for 100 points of damage. (Critical)'),
+    line(1, 'You backstab a ghoul for 500 points of damage. (Slay Undead)'),
+    line(2, 'You backstab a ghoul for 80 points of damage. (Riposte)'),
+    line(3, 'You have slain a ghoul!')
+  ])
+
+  const fight = engine.snapshot(start + 3_000).fights[0]
+  const backstab = fight.abilities.find(
+    (item) => item.actorType === 'player' && item.ability === 'Backstab'
+  )
+
+  assert.ok(backstab)
+  assert.equal(backstab.damage, 680)
+  assert.equal(backstab.hits, 3)
+  assert.equal(backstab.criticalHits, 1)
+  assert.equal(backstab.bestHit, 500)
+  assert.equal(backstab.modifiers['Critical'], 1)
+  assert.equal(backstab.modifiers['Slay Undead'], 1)
+  assert.equal(backstab.modifiers['Riposte'], 1)
+})

@@ -13,6 +13,7 @@ import {
 } from './types.ts'
 import type {
   CombatState,
+  FightAbilitySnapshot,
   FightDamageEvent,
   FightEndReason,
   FightEngineOptions,
@@ -336,6 +337,9 @@ export class FightEngine {
         target: event.target,
         damage: event.damage,
         source: event.source,
+        ability: event.ability,
+        critical: event.critical,
+        modifier: event.modifier,
         actor: this.knownPets.get(normalizeName(event.actor)) ?? event.actor,
         actorType: 'pet'
       })
@@ -478,6 +482,45 @@ export class FightEngine {
     const petDamage = damageEvents
       .filter((event) => event.actorType === 'pet')
       .reduce((total, event) => total + event.damage, 0)
+    const abilityMap = new Map<string, FightAbilitySnapshot>()
+
+    for (const event of damageEvents) {
+      const ability = event.ability ?? event.source
+      const key = [
+        event.actorType,
+        normalizeName(event.actor),
+        event.source,
+        normalizeName(ability)
+      ].join('|')
+
+      const current = abilityMap.get(key)
+      if (current) {
+        current.damage += event.damage
+        current.hits += 1
+        current.bestHit = Math.max(current.bestHit, event.damage)
+        if (event.critical) current.criticalHits += 1
+        if (event.modifier) {
+          current.modifiers[event.modifier] =
+            (current.modifiers[event.modifier] ?? 0) + 1
+        }
+      } else {
+        abilityMap.set(key, {
+          ability,
+          source: event.source,
+          actor: event.actor,
+          actorType: event.actorType,
+          damage: event.damage,
+          hits: 1,
+          criticalHits: event.critical ? 1 : 0,
+          bestHit: event.damage,
+          modifiers: event.modifier ? { [event.modifier]: 1 } : {}
+        })
+      }
+    }
+
+    const abilities = [...abilityMap.values()].sort(
+      (a, b) => b.damage - a.damage
+    )
     const rollingStart = clock - this.rollingWindowMs
     const rollingDamage = damageEvents
       .filter((event) => event.timestamp >= rollingStart)
@@ -655,6 +698,7 @@ export class FightEngine {
       playerDamage,
       petDamage,
       combatants,
+      abilities,
       mobs,
       fightDps,
       rollingDps,

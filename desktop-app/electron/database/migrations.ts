@@ -2,6 +2,7 @@ import type { Database as DatabaseHandle } from 'better-sqlite3'
 import initialSchema from './schema/001_initial_schema.sql?raw'
 import persistentJournal from './schema/002_persistent_journal.sql?raw'
 import encounterHistory from './schema/003_encounter_history.sql?raw'
+import combatAnalytics from './schema/004_combat_analytics.sql?raw'
 
 type Migration = {
   version: number
@@ -24,6 +25,11 @@ const migrations: Migration[] = [
     version: 3,
     name: 'encounter_history',
     sql: encounterHistory
+  },
+  {
+    version: 4,
+    name: 'combat_analytics',
+    sql: combatAnalytics
   }
 ]
 

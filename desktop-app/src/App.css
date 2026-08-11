@@ -1025,3 +1025,81 @@ textarea {
   flex: 0 0 auto;
   padding: 0.4rem 0.6rem;
 }
+
+/* =========================================================
+   PEQL responsive desktop shell stabilization
+   ========================================================= */
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+}
+
+body {
+  overflow: auto;
+}
+
+.layout {
+  min-height: 100vh;
+  width: 100%;
+}
+
+.workspace {
+  min-height: calc(100vh - 61px);
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-page {
+  flex: 1 0 auto;
+  width: 100%;
+  min-height: 0;
+  padding-bottom: 24px;
+}
+
+.dashboard-page .log-panel {
+  width: calc(100% - 48px);
+  max-width: 1100px;
+}
+
+.select-button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+@media (max-width: 760px) {
+  .sidebar {
+    overflow-x: auto;
+    align-items: stretch;
+  }
+
+  .sidebar button {
+    flex: 0 0 auto;
+  }
+
+  .workspace > .app-header {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+
+  .dashboard-page .log-panel {
+    width: calc(100% - 24px);
+    padding: 16px;
+  }
+
+  .selected-file-line {
+    flex-wrap: wrap;
+  }
+
+  .alarm-sound-name {
+    max-width: 100%;
+  }
+}
+
+
+/* COMBAT ANALYTICS V1 */
+.fight-details-analytics{margin-top:18px;border-top:1px solid #29445a;padding-top:16px}.fight-details-heading,.analytics-heading{display:flex;justify-content:space-between;align-items:center;gap:16px}.fight-details-heading>div,.fight-ability-main,.fight-ability-numbers,.analytics-stat,.analytics-target-row>div{display:flex;flex-direction:column;gap:3px}.fight-details-heading span,.fight-ability-main span,.fight-ability-numbers span,.analytics-stat span,.analytics-target-row span{color:#8eacc2;font-size:.82rem}.fight-ability-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px}.fight-ability-row{display:flex;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid #203a50;border-radius:9px;background:#0c1c2b}.fight-ability-numbers{text-align:right}.analytics-page{width:min(1180px,calc(100% - 48px));margin:24px auto 40px}.analytics-heading{margin-bottom:18px}.analytics-heading h2{margin:3px 0}.analytics-heading p{margin:0;color:#9ec5df}.analytics-kicker{color:#57c8ff;font-size:.78rem;font-weight:700;letter-spacing:.14em}.analytics-version{border:1px solid #31516b;border-radius:999px;padding:7px 12px}.analytics-coverage,.analytics-card,.analytics-stat{border:1px solid #29445a;background:#0b1b29;border-radius:10px}.analytics-coverage{padding:10px 12px;margin-bottom:14px;color:#a9c6d9;font-size:.9rem}.analytics-summary-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:14px}.analytics-stat{padding:12px}.analytics-stat strong{font-size:1.12rem}.analytics-columns{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}.analytics-card{padding:16px}.analytics-source-list,.analytics-target-list{display:flex;flex-direction:column;gap:7px;margin-top:14px}.analytics-source-row,.analytics-target-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px 10px;border-radius:8px;background:#0d2233}.analytics-table-wrap{overflow-x:auto;margin-top:14px}.analytics-table{width:100%;border-collapse:collapse}.analytics-table th,.analytics-table td{padding:9px 10px;border-bottom:1px solid #20394d;text-align:right;white-space:nowrap}.analytics-table th:first-child,.analytics-table td:first-child,.analytics-table th:nth-child(2),.analytics-table td:nth-child(2){text-align:left}.analytics-table th{color:#74cfff;font-size:.78rem;text-transform:uppercase}.analytics-pet-tag{margin-left:7px;padding:2px 5px;border:1px solid #40607a;border-radius:5px;color:#9ec5df;font-size:.66rem}@media(max-width:900px){.analytics-summary-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.analytics-columns,.fight-ability-list{grid-template-columns:1fr}}@media(max-width:620px){.analytics-page{width:calc(100% - 24px)}.analytics-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.fight-ability-row{flex-direction:column}.fight-ability-numbers{text-align:left}}

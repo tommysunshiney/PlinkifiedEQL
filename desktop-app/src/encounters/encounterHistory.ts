@@ -274,6 +274,10 @@ export function encountersFromFights(
         encounterTitle,
         primaryNpcName,
         targetNames: fight.targets,
+        abilities: fight.abilities.map((ability) => ({
+          ability: ability.ability, source: ability.source, actor: ability.actor, actorType: ability.actorType,
+          damage: Math.round(ability.damage), hits: ability.hits, criticalHits: ability.criticalHits, bestHit: Math.round(ability.bestHit)
+        })),
         mobs: fight.mobs.map((mob) => ({
           name: mob.name,
           joinedOffsetMs: mob.joinedOffsetMs,
@@ -319,8 +323,8 @@ export function encountersFromFights(
         dps: fight.fightDps,
         bestHit: Math.round(fight.bestHit),
         mobKillCount: fight.defeatedTargets.length,
-        endReason: fight.endReason,
-        outcome: fight.endReason === 'victory' ? 'victory' : 'failed',
+        endReason: fight.endReason ?? 'unknown',
+        outcome: fight.endReason === 'victory' ? ('victory' as const) : ('failed' as const),
         actions: encounterActions(
           lines,
           fight.startedAt,

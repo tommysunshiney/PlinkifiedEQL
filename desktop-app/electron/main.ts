@@ -34,6 +34,7 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
   : RENDERER_DIST
 
 let win: BrowserWindow | null
+let logDialogOpen = false
 
 function formatSessionTimestamp(date: Date): string {
   const year = date.getFullYear()
@@ -113,24 +114,161 @@ ipcMain.handle('external:open', async (_, url: string) => {
 })
 
 ipcMain.handle('dialog:openLogFile', async () => {
-  const result = await dialog.showOpenDialog({
-    title: 'Select EQL Log File',
-    properties: ['openFile'],
-    filters: [
-      { name: 'EverQuest Legends Log Files', extensions: ['txt'] },
-      { name: 'All Files', extensions: ['*'] },
-    ],
-  })
+  if (logDialogOpen) return null
 
-  if (result.canceled || result.filePaths.length === 0) return null
-  return result.filePaths[0]
+  logDialogOpen = true
+  try {
+    const result = win
+      ? await dialog.showOpenDialog(win, {
+      title: 'Select EQL Log File',
+      properties: ['openFile'],
+      filters: [
+        { name: 'EverQuest Legends Log Files', extensions: ['txt'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    })
+      : await dialog.showOpenDialog({
+          title: 'Select EQL Log File',
+          properties: ['openFile'],
+          filters: [
+            { name: 'EverQuest Legends Log Files', extensions: ['txt'] },
+            { name: 'All Files', extensions: ['*'] },
+          ],
+        })
+
+    if (result.canceled || result.filePaths.length === 0) return null
+    return result.filePaths[0]
+  } finally {
+    logDialogOpen = false
+  }
 })
 
+const RECENT_KILL_TARGET = 10
+const RECENT_LOOKBACK_MS = 30 * 60 * 1000
+const RECENT_READ_CHUNK_BYTES = 256 * 1024
+const RECENT_MAX_BYTES = 8 * 1024 * 1024
+
+function parseLogTimestamp(line: string): number | null {
+  const match = line.match(/^\[([^\]]+)\]/)
+  if (!match) return null
+
+  const parsed = Date.parse(match[1])
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function isKillLine(line: string): boolean {
+  return /\]\s+You have slain .+!$/i.test(line)
+}
+
+function isSafeReplayBoundary(line: string): boolean {
+  return (
+    /===== PEQL SESSION START/.test(line) ||
+    /\]\s+You have entered .+/i.test(line)
+  )
+}
+
+async function readRecentLogTail(filePath: string): Promise<string[]> {
+  const handle = await fs.open(filePath, 'r')
+
+  try {
+    const stats = await handle.stat()
+    if (stats.size === 0) return []
+
+    let position = stats.size
+    let accumulated = ''
+    let bytesReadTotal = 0
+    let latestTimestamp: number | null = null
+    let reachedTarget = false
+    let targetTimestamp: number | null = null
+
+    while (position > 0 && bytesReadTotal < RECENT_MAX_BYTES) {
+      const chunkSize = Math.min(RECENT_READ_CHUNK_BYTES, position)
+      position -= chunkSize
+
+      const buffer = Buffer.alloc(chunkSize)
+      await handle.read(buffer, 0, chunkSize, position)
+
+      accumulated = buffer.toString('utf8') + accumulated
+      bytesReadTotal += chunkSize
+
+      const lines = accumulated
+        .split(/\r?\n/)
+        .filter((line) => line.trim().length > 0)
+
+      if (lines.length === 0) continue
+
+      if (latestTimestamp === null) {
+        for (let index = lines.length - 1; index >= 0; index -= 1) {
+          const timestamp = parseLogTimestamp(lines[index])
+          if (timestamp !== null) {
+            latestTimestamp = timestamp
+            break
+          }
+        }
+      }
+
+      if (latestTimestamp === null) continue
+
+      const cutoff = latestTimestamp - RECENT_LOOKBACK_MS
+      let killCount = 0
+      let stopIndex = -1
+
+      for (let index = lines.length - 1; index >= 0; index -= 1) {
+        const line = lines[index]
+        const timestamp = parseLogTimestamp(line)
+
+        if (timestamp !== null && timestamp < cutoff) {
+          stopIndex = index + 1
+          break
+        }
+
+        if (isKillLine(line)) {
+          killCount += 1
+          if (killCount >= RECENT_KILL_TARGET && !reachedTarget) {
+            reachedTarget = true
+            targetTimestamp = timestamp
+          }
+        }
+
+        if (
+          reachedTarget &&
+          targetTimestamp !== null &&
+          isSafeReplayBoundary(line)
+        ) {
+          stopIndex = index
+          break
+        }
+      }
+
+      if (stopIndex >= 0) {
+        return lines.slice(stopIndex)
+      }
+
+      if (reachedTarget && position === 0) {
+        return lines
+      }
+    }
+
+    const lines = accumulated
+      .split(/\r?\n/)
+      .filter((line) => line.trim().length > 0)
+
+    if (latestTimestamp === null) return lines
+
+    const cutoff = latestTimestamp - RECENT_LOOKBACK_MS
+    const cutoffIndex = lines.findIndex((line) => {
+      const timestamp = parseLogTimestamp(line)
+      return timestamp !== null && timestamp >= cutoff
+    })
+
+    return cutoffIndex >= 0 ? lines.slice(cutoffIndex) : lines
+  } finally {
+    await handle.close()
+  }
+}
+
 ipcMain.handle('log:read', async (_, filePath: string) => {
-  const text = await fs.readFile(filePath, 'utf8')
-  return text
-    .split(/\r?\n/)
-    .filter((line) => line.trim().length > 0)
+  return readRecentLogTail(filePath)
 })
 
 ipcMain.handle('log:newSession', async (_, filePath: string) => {

@@ -59,6 +59,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const fightEngineRef = useRef(new FightEngine())
   const selectedLogRef = useRef('')
   const logLinesRef = useRef<string[]>([])
+  const replayInProgressRef = useRef(false)
+  const queuedLiveLinesRef = useRef<string[]>([])
   const [selectedLog, setSelectedLog] = useState('')
   const [logLines, setLogLines] = useState<string[]>([])
   const [fightState, setFightState] = useState<FightEngineSnapshot>(() =>
@@ -68,6 +70,22 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [connectionError, setConnectionError] = useState('')
   const [journalRevision, setJournalRevision] = useState(0)
   const [encounterRevision, setEncounterRevision] = useState(0)
+
+  async function ingestReplayInChunks(lines: string[]) {
+    const chunkSize = 2_000
+
+    fightEngineRef.current.reset()
+
+    for (let index = 0; index < lines.length; index += chunkSize) {
+      fightEngineRef.current.ingestLines(
+        lines.slice(index, index + chunkSize)
+      )
+
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, 0)
+      })
+    }
+  }
 
   async function persistJournalLines(
     filePath: string,
@@ -124,6 +142,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       logLinesRef.current = nextLines
       setLogLines(nextLines)
 
+      if (replayInProgressRef.current) {
+        queuedLiveLinesRef.current.push(...newLines)
+        return
+      }
+
       fightEngineRef.current.ingestLines(newLines)
       const nextFightState = fightEngineRef.current.snapshot()
       setFightState(nextFightState)
@@ -164,30 +187,60 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   )
 
   async function connectToLog(filePath: string) {
-    const lines = await window.electronAPI.readLogFile(filePath)
-    await window.electronAPI.startLogWatch(filePath)
+    replayInProgressRef.current = true
+    queuedLiveLinesRef.current = []
 
-    const currentSessionLines = getSessionLines(lines)
-    fightEngineRef.current.reset()
-    fightEngineRef.current.ingestLines(currentSessionLines)
-    const nextFightState = fightEngineRef.current.snapshot()
+    try {
+      // log:read is now a bounded recent-tail read, never a full-file load.
+      const recentLines = await window.electronAPI.readLogFile(filePath)
 
-    selectedLogRef.current = filePath
-    logLinesRef.current = lines
-    setSelectedLog(filePath)
-    setLogLines(lines)
-    setFightState(nextFightState)
-    setIsConnected(true)
-    setConnectionError('')
-    window.localStorage.setItem(LAST_LOG_KEY, filePath)
+      selectedLogRef.current = filePath
+      logLinesRef.current = recentLines
+      setSelectedLog(filePath)
+      setLogLines(recentLines)
+      setConnectionError('')
+      window.localStorage.setItem(LAST_LOG_KEY, filePath)
 
-    void persistJournalLines(filePath, lines)
-    void persistCompletedFights(
-      filePath,
-      currentSessionLines,
-      nextFightState.fights,
-      'replay'
-    )
+      // Connected means the live watcher is attached. Historical warmup no
+      // longer blocks the Connected state.
+      await window.electronAPI.startLogWatch(filePath)
+      setIsConnected(true)
+
+      const recentSessionLines = getSessionLines(recentLines)
+      await ingestReplayInChunks(recentSessionLines)
+
+      const queuedLines = queuedLiveLinesRef.current
+      queuedLiveLinesRef.current = []
+
+      if (queuedLines.length > 0) {
+        fightEngineRef.current.ingestLines(queuedLines)
+        logLinesRef.current = [...logLinesRef.current, ...queuedLines]
+        setLogLines(logLinesRef.current)
+      }
+
+      const nextFightState = fightEngineRef.current.snapshot()
+      setFightState(nextFightState)
+      replayInProgressRef.current = false
+
+      // SQLite owns durable history. Persist only the bounded recent tail.
+      window.setTimeout(() => {
+        void persistJournalLines(
+          filePath,
+          getSessionLines(logLinesRef.current)
+        )
+        void persistCompletedFights(
+          filePath,
+          getSessionLines(logLinesRef.current),
+          nextFightState.fights,
+          'replay'
+        )
+      }, 250)
+    } catch (error) {
+      replayInProgressRef.current = false
+      queuedLiveLinesRef.current = []
+      setIsConnected(false)
+      throw error
+    }
   }
 
   async function selectLog() {
