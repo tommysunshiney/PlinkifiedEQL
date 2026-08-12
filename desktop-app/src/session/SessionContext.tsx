@@ -61,6 +61,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const logLinesRef = useRef<string[]>([])
   const replayInProgressRef = useRef(false)
   const queuedLiveLinesRef = useRef<string[]>([])
+  const persistedFightIdsRef = useRef(new Set<string>())
+  const latestLogTimestampRef = useRef(0)
+  const latestLogTimestampSeenAtRef = useRef(Date.now())
   const [selectedLog, setSelectedLog] = useState('')
   const [logLines, setLogLines] = useState<string[]>([])
   const [fightState, setFightState] = useState<FightEngineSnapshot>(() =>
@@ -70,6 +73,34 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [connectionError, setConnectionError] = useState('')
   const [journalRevision, setJournalRevision] = useState(0)
   const [encounterRevision, setEncounterRevision] = useState(0)
+
+  function rememberLatestLogTimestamp(lines: string[]) {
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      const match = lines[index].match(/^\[([^\]]+)\]/)
+      if (!match) continue
+
+      const timestamp = Date.parse(match[1])
+      if (!Number.isFinite(timestamp)) continue
+
+      latestLogTimestampRef.current = Math.max(
+        latestLogTimestampRef.current,
+        timestamp
+      )
+      latestLogTimestampSeenAtRef.current = Date.now()
+      return
+    }
+  }
+
+  function liveSnapshotClock(): number {
+    if (latestLogTimestampRef.current <= 0) {
+      return Date.now()
+    }
+
+    return (
+      latestLogTimestampRef.current +
+      Math.max(0, Date.now() - latestLogTimestampSeenAtRef.current)
+    )
+  }
 
   async function ingestReplayInChunks(lines: string[]) {
     const chunkSize = 2_000
@@ -118,7 +149,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   ) {
     if (!filePath || fights.length === 0) return
 
-    const encounters = encountersFromFights(lines, fights)
+    const completed = fights.filter(
+      (fight) =>
+        !fight.active &&
+        fight.endedAt !== null &&
+        fight.endReason !== null
+    )
+
+    const candidates =
+      mode === 'replay'
+        ? completed
+        : completed.filter(
+            (fight) => !persistedFightIdsRef.current.has(fight.id)
+          )
+
+    if (candidates.length === 0) return
+
+    const encounters = encountersFromFights(lines, candidates)
     if (encounters.length === 0) return
 
     try {
@@ -127,6 +174,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         encounters,
         mode
       )
+
+      for (const fight of candidates) {
+        persistedFightIdsRef.current.add(fight.id)
+      }
 
       if (inserted > 0) {
         setEncounterRevision((revision) => revision + inserted)
@@ -147,8 +198,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         return
       }
 
+      rememberLatestLogTimestamp(newLines)
       fightEngineRef.current.ingestLines(newLines)
-      const nextFightState = fightEngineRef.current.snapshot()
+      const nextFightState = fightEngineRef.current.snapshot(
+        liveSnapshotClock()
+      )
       setFightState(nextFightState)
 
       const filePath = selectedLogRef.current
@@ -165,17 +219,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      const nextFightState = fightEngineRef.current.snapshot()
+      const nextFightState = fightEngineRef.current.snapshot(
+        liveSnapshotClock()
+      )
       setFightState(nextFightState)
-
-      const filePath = selectedLogRef.current
-      if (filePath) {
-        void persistCompletedFights(
-          filePath,
-          getSessionLines(logLinesRef.current),
-          nextFightState.fights
-        )
-      }
     }, 1000)
 
     return () => window.clearInterval(timer)
@@ -189,10 +236,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   async function connectToLog(filePath: string) {
     replayInProgressRef.current = true
     queuedLiveLinesRef.current = []
+    persistedFightIdsRef.current.clear()
+    latestLogTimestampRef.current = 0
+    latestLogTimestampSeenAtRef.current = Date.now()
 
     try {
       // log:read is now a bounded recent-tail read, never a full-file load.
       const recentLines = await window.electronAPI.readLogFile(filePath)
+      rememberLatestLogTimestamp(recentLines)
 
       selectedLogRef.current = filePath
       logLinesRef.current = recentLines
@@ -213,12 +264,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       queuedLiveLinesRef.current = []
 
       if (queuedLines.length > 0) {
+        rememberLatestLogTimestamp(queuedLines)
         fightEngineRef.current.ingestLines(queuedLines)
         logLinesRef.current = [...logLinesRef.current, ...queuedLines]
         setLogLines(logLinesRef.current)
       }
 
-      const nextFightState = fightEngineRef.current.snapshot()
+      const nextFightState = fightEngineRef.current.snapshot(
+        liveSnapshotClock()
+      )
       setFightState(nextFightState)
       replayInProgressRef.current = false
 
@@ -286,8 +340,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const currentSessionLines = getSessionLines(lines)
 
     fightEngineRef.current.reset()
+    persistedFightIdsRef.current.clear()
+    latestLogTimestampRef.current = 0
+    latestLogTimestampSeenAtRef.current = Date.now()
+    rememberLatestLogTimestamp(currentSessionLines)
     fightEngineRef.current.ingestLines(currentSessionLines)
-    const nextFightState = fightEngineRef.current.snapshot()
+    const nextFightState = fightEngineRef.current.snapshot(
+      liveSnapshotClock()
+    )
 
     logLinesRef.current = lines
     setLogLines(lines)

@@ -276,7 +276,9 @@ export function encountersFromFights(
         targetNames: fight.targets,
         abilities: fight.abilities.map((ability) => ({
           ability: ability.ability, source: ability.source, actor: ability.actor, actorType: ability.actorType,
-          damage: Math.round(ability.damage), hits: ability.hits, criticalHits: ability.criticalHits, bestHit: Math.round(ability.bestHit)
+          damage: Math.round(ability.damage), hits: ability.hits, criticalHits: ability.criticalHits, bestHit: Math.round(ability.bestHit),
+          modifiers: ability.modifiers,
+          modifierDamage: ability.modifierDamage
         })),
         mobs: fight.mobs.map((mob) => ({
           name: mob.name,

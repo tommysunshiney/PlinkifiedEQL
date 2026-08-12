@@ -13,6 +13,7 @@ export type FightEndReason =
   | 'death'
   | 'zone'
   | 'timeout'
+  | 'charm'
 
 export type AutoAttackState = 'on' | 'off' | 'unknown'
 
@@ -28,7 +29,6 @@ export type CriticalType =
   | 'critical'
   | 'crippling-blow'
   | 'lucky-critical'
-  | 'finishing-blow'
 
 export type FightDamageEvent = {
   timestamp: number
@@ -52,6 +52,7 @@ export type FightAbilitySnapshot = {
   criticalHits: number
   bestHit: number
   modifiers: Record<string, number>
+  modifierDamage: Record<string, number>
 }
 
 export type FightCombatantSnapshot = {

@@ -62,6 +62,8 @@ export class FightEngine {
   private currentFight: MutableFight | null = null
   private combatState: CombatState = emptyCombatState()
   private lastPlayerSpellCastAt = 0
+  private lastPlayerSpellName: string | null = null
+  private charmedPets = new Map<string, { name: string; spell: string | null }>()
   private recentlyDefeatedTargets = new Map<string, number>()
   private knownPets = new Map<string, string>()
   private pendingActorEvents = new Map<string, PendingActorEvent[]>()
@@ -77,6 +79,8 @@ export class FightEngine {
     this.currentFight = null
     this.combatState = emptyCombatState()
     this.lastPlayerSpellCastAt = 0
+    this.lastPlayerSpellName = null
+    this.charmedPets.clear()
     this.recentlyDefeatedTargets.clear()
     this.knownPets.clear()
     this.pendingActorEvents.clear()
@@ -157,6 +161,27 @@ export class FightEngine {
         this.confirmPet(event.pet)
         return
 
+      case 'charm':
+        this.confirmCharm(
+          event.target,
+          event.timestamp - this.lastPlayerSpellCastAt <= 15_000
+            ? this.lastPlayerSpellName
+            : null
+        )
+        this.retireCharmedHostile(event.target, event.timestamp)
+        this.combatState.autoAttackWarningStartedAt = null
+        this.combatState.autoAttackWarning = false
+        this.pauseAutoAttackWarning(
+          event.timestamp + DEFAULT_CROWD_CONTROL_PAUSE_MS
+        )
+        return
+
+      case 'player-effect-worn-off':
+        if (this.charmEffectMatches(event.target, event.spell)) {
+          this.releaseCharm(event.target)
+        }
+        return
+
       case 'incoming-dot':
         // Lingering DOTs can tick after Exodus, zoning, or a kill. They may
         // extend an encounter that is already active, but they cannot create
@@ -168,6 +193,10 @@ export class FightEngine {
 
       case 'incoming-damage':
       case 'incoming-miss':
+        if (this.isCharmedPet(event.attacker)) {
+          this.releaseCharm(event.attacker)
+        }
+
         if (
           this.wasRecentlyDefeated(
             event.attacker,
@@ -205,6 +234,7 @@ export class FightEngine {
 
       case 'player-spell-cast':
         this.lastPlayerSpellCastAt = event.timestamp
+        this.lastPlayerSpellName = event.spell
         this.pauseAutoAttackWarning(event.timestamp + DEFAULT_SPELL_CAST_PAUSE_MS)
         return
 
@@ -265,10 +295,12 @@ export class FightEngine {
         return
 
       case 'death':
+        this.charmedPets.clear()
         this.finishCurrentFight(event.timestamp, 'death')
         return
 
       case 'zone':
+        this.charmedPets.clear()
         this.finishCurrentFight(event.timestamp, 'zone')
         this.combatState.autoAttack = 'unknown'
         this.combatState.feigned = false
@@ -282,7 +314,18 @@ export class FightEngine {
   }
 
   private acceptOrQueueActorEvent(event: PendingActorEvent): void {
-    // A known pet attacking an NPC is outgoing pet combat.
+    // If a temporary charm pet attacks our permanent pet, charm has ended
+    // even if EQL omitted or delayed the explicit worn-off line.
+    if (
+      this.isCharmedPet(event.actor) &&
+      this.isPermanentPet(event.target)
+    ) {
+      this.releaseCharm(event.actor)
+      this.recordActivity(event.timestamp, event.actor)
+      return
+    }
+
+    // A friendly permanent/charmed pet attacking an NPC is outgoing pet combat.
     if (this.isKnownPet(event.actor)) {
       this.recordPetEvent(event)
       return
@@ -307,15 +350,85 @@ export class FightEngine {
 
   private confirmPet(pet: string): void {
     const key = normalizeName(pet)
-    this.knownPets.set(key, pet)
+
+    // Charmed NPCs also use Master speech. Never promote them into the
+    // permanent summoned-pet registry.
+    if (!this.charmedPets.has(key)) {
+      this.knownPets.set(key, pet)
+    }
 
     const pending = this.pendingActorEvents.get(key) ?? []
     for (const event of pending) this.recordPetEvent(event)
     this.pendingActorEvents.delete(key)
   }
 
-  private isKnownPet(name: string): boolean {
+  private confirmCharm(target: string, spell: string | null): void {
+    const key = normalizeName(target)
+    this.charmedPets.set(key, { name: target, spell })
+
+    const pending = this.pendingActorEvents.get(key) ?? []
+    for (const event of pending) this.recordPetEvent(event)
+    this.pendingActorEvents.delete(key)
+  }
+
+  private releaseCharm(target: string): void {
+    this.charmedPets.delete(normalizeName(target))
+  }
+
+  private isCharmedPet(name: string): boolean {
+    return this.charmedPets.has(normalizeName(name))
+  }
+
+  private isPermanentPet(name: string): boolean {
     return this.knownPets.has(normalizeName(name))
+  }
+
+  private isKnownPet(name: string): boolean {
+    const key = normalizeName(name)
+    return this.knownPets.has(key) || this.charmedPets.has(key)
+  }
+
+  private charmEffectMatches(target: string, spell: string): boolean {
+    const charm = this.charmedPets.get(normalizeName(target))
+    if (!charm) return false
+
+    // When we captured the spell that produced the charm, require the worn
+    // effect to match it. If the cast name was unavailable, the explicit
+    // worn-off-on-a-currently-charmed-target line is still strong evidence.
+    return (
+      charm.spell === null ||
+      normalizeName(charm.spell) === normalizeName(spell)
+    )
+  }
+
+  private retireCharmedHostile(target: string, timestamp: number): void {
+    if (!this.currentFight) return
+
+    const key = normalizeName(target)
+    if (!this.currentFight.targets.has(key)) return
+
+    this.currentFight.targets.delete(key)
+    this.currentFight.targetJoinedAt.delete(key)
+    this.currentFight.targetKilledAt.delete(key)
+    this.currentFight.defeatedTargets.delete(key)
+    this.currentFight.controlledTargets.delete(key)
+
+    // If charming the pulled mob removed the only hostile from the encounter,
+    // an incoming-only setup pull is not useful combat history. Discard that
+    // empty shell instead of persisting a zero-damage "charm" encounter.
+    //
+    // If the player/pet had already dealt real damage before charm landed,
+    // preserve that partial encounter explicitly.
+    if (this.currentFight.targets.size === 0) {
+      if (this.currentFight.damageEvents.length === 0) {
+        this.currentFight = null
+        this.combatState.lastActivityAt = timestamp
+        this.combatState.autoAttackWarningStartedAt = null
+        this.combatState.autoAttack = 'unknown'
+      } else {
+        this.finishCurrentFight(timestamp, 'charm')
+      }
+    }
   }
 
   private recordPetEvent(event: PendingActorEvent): void {
@@ -340,7 +453,10 @@ export class FightEngine {
         ability: event.ability,
         critical: event.critical,
         modifier: event.modifier,
-        actor: this.knownPets.get(normalizeName(event.actor)) ?? event.actor,
+        actor:
+          this.knownPets.get(normalizeName(event.actor)) ??
+          this.charmedPets.get(normalizeName(event.actor))?.name ??
+          event.actor,
         actorType: 'pet'
       })
     }
@@ -354,6 +470,8 @@ export class FightEngine {
   }
 
   private recordActivity(timestamp: number, target: string): void {
+    if (/^(?:you|whittler)$/i.test(target.trim())) return
+
     if (!this.currentFight) {
       this.currentFight = {
         id: `${timestamp}-${normalizeName(target)}`,
@@ -385,6 +503,7 @@ export class FightEngine {
 
   private recordKill(timestamp: number, target: string): void {
     const normalizedTarget = normalizeName(target)
+    this.charmedPets.delete(normalizedTarget)
     this.recentlyDefeatedTargets.set(normalizedTarget, timestamp)
 
     if (!this.currentFight) return
@@ -502,6 +621,8 @@ export class FightEngine {
         if (event.modifier) {
           current.modifiers[event.modifier] =
             (current.modifiers[event.modifier] ?? 0) + 1
+          current.modifierDamage[event.modifier] =
+            (current.modifierDamage[event.modifier] ?? 0) + event.damage
         }
       } else {
         abilityMap.set(key, {
@@ -513,7 +634,8 @@ export class FightEngine {
           hits: 1,
           criticalHits: event.critical ? 1 : 0,
           bestHit: event.damage,
-          modifiers: event.modifier ? { [event.modifier]: 1 } : {}
+          modifiers: event.modifier ? { [event.modifier]: 1 } : {},
+          modifierDamage: event.modifier ? { [event.modifier]: event.damage } : {}
         })
       }
     }

@@ -18,12 +18,14 @@ export type CombatLogEvent =
   | { kind: 'zone'; timestamp: number }
   | { kind: 'auto-attack'; timestamp: number; enabled: boolean }
   | { kind: 'feign'; timestamp: number; successful: boolean }
-  | { kind: 'player-spell-cast'; timestamp: number }
+  | { kind: 'player-spell-cast'; timestamp: number; spell: string }
   | { kind: 'crowd-control'; timestamp: number; target: string; effect: 'mez' | 'stun' }
   | { kind: 'crowd-control-end'; timestamp: number; target: string }
   | { kind: 'enemy-spell-cast'; timestamp: number; caster: string; spell: string }
   | { kind: 'enemy-spell-interrupt'; timestamp: number; caster: string; spell: string }
   | { kind: 'pet-identity'; timestamp: number; pet: string }
+  | { kind: 'charm'; timestamp: number; target: string }
+  | { kind: 'player-effect-worn-off'; timestamp: number; spell: string; target: string }
 
 const MELEE_VERBS =
   '(?:hit(?:s)?|slash(?:es)?|pierc(?:e|es)|crush(?:es)?|punch(?:es)?|' +
@@ -32,12 +34,32 @@ const MELEE_VERBS =
   'gor(?:e|es)|smash(?:es)?|rend(?:s)?|sting(?:s)?|frenz(?:y|ies))'
 
 function titleCaseAbility(value: string): string {
-  return value
-    .trim()
-    .replace(/ies$/i, 'y')
-    .replace(/es$/i, '')
-    .replace(/s$/i, '')
-    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+  const normalized = value.trim().toLowerCase()
+  const known: Record<string, string> = {
+    hit: 'Hit', hits: 'Hit',
+    slash: 'Slash', slashes: 'Slash',
+    pierce: 'Pierce', pierces: 'Pierce',
+    crush: 'Crush', crushes: 'Crush',
+    punch: 'Punch', punches: 'Punch',
+    kick: 'Kick', kicks: 'Kick',
+    bash: 'Bash', bashes: 'Bash',
+    cleave: 'Cleave', cleaves: 'Cleave',
+    backstab: 'Backstab', backstabs: 'Backstab',
+    reave: 'Reave', reaves: 'Reave',
+    maul: 'Maul', mauls: 'Maul',
+    bite: 'Bite', bites: 'Bite',
+    claw: 'Claw', claws: 'Claw',
+    strike: 'Strike', strikes: 'Strike',
+    slam: 'Slam', slams: 'Slam',
+    gore: 'Gore', gores: 'Gore',
+    smash: 'Smash', smashes: 'Smash',
+    rend: 'Rend', rends: 'Rend',
+    sting: 'Sting', stings: 'Sting',
+    frenzy: 'Frenzy', frenzies: 'Frenzy'
+  }
+
+  return known[normalized] ??
+    normalized.replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
 function normalizeModifier(value: string | undefined): string | null {
@@ -49,18 +71,13 @@ function normalizeModifier(value: string | undefined): string | null {
 function criticalType(value: string | undefined): CriticalType | null {
   if (!value) return null
 
-  switch (value.toLowerCase()) {
-    case 'critical':
-      return 'critical'
-    case 'crippling blow':
-      return 'crippling-blow'
-    case 'lucky critical':
-      return 'lucky-critical'
-    case 'finishing blow':
-      return 'finishing-blow'
-    default:
-      return null
-  }
+  const normalized = value.trim().toLowerCase()
+
+  if (normalized.includes('lucky critical')) return 'lucky-critical'
+  if (normalized.includes('crippling blow')) return 'crippling-blow'
+  if (normalized.includes('critical')) return 'critical'
+
+  return null
 }
 
 function cleanName(value: string): string {
@@ -115,8 +132,24 @@ export function parseCombatLine(line: string): CombatLogEvent | null {
     }
   }
 
-  if (/\]\s+You begin casting .+\.\s*$/i.test(line)) {
-    return { kind: 'player-spell-cast', timestamp }
+  match = line.match(
+    /\]\s+You begin (?:casting|singing) (.+?)\.\s*$/i
+  )
+  if (match) {
+    return {
+      kind: 'player-spell-cast',
+      timestamp,
+      spell: match[1].trim()
+    }
+  }
+
+  match = line.match(/\]\s+(.+?) has been charmed\.\s*$/i)
+  if (match) {
+    return {
+      kind: 'charm',
+      timestamp,
+      target: cleanName(match[1])
+    }
   }
 
   match = line.match(
@@ -156,6 +189,18 @@ export function parseCombatLine(line: string): CombatLogEvent | null {
       kind: 'crowd-control-end',
       timestamp,
       target: cleanName(match[1])
+    }
+  }
+
+  match = line.match(
+    /\]\s+Your (.+?) spell has worn off of (.+?)\.\s*$/i
+  )
+  if (match) {
+    return {
+      kind: 'player-effect-worn-off',
+      timestamp,
+      spell: match[1].trim(),
+      target: cleanName(match[2])
     }
   }
 

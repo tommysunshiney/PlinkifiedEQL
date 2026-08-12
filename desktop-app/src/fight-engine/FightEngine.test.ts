@@ -651,3 +651,150 @@ test('ability breakdown counts modifiers independently from crits', () => {
   assert.equal(backstab.modifiers['Slay Undead'], 1)
   assert.equal(backstab.modifiers['Riposte'], 1)
 })
+
+
+test('normalizes inflected pet cleave as Cleave', () => {
+  const event = parseCombatLine(
+    line(0, 'Keker cleaves a zol ghoul knight for 56 points of damage.')
+  )
+
+  assert.equal(event?.kind, 'actor-damage')
+  if (event?.kind === 'actor-damage') {
+    assert.equal(event.ability, 'Cleave')
+  }
+})
+
+test('recognizes successful charm and clears a stale AA warning', () => {
+  const engine = new FightEngine()
+  engine.ingestLines([
+    line(0, 'Auto attack is off.'),
+    line(1, 'ice boned skeleton punches YOU for 6 points of damage.')
+  ])
+
+  assert.equal(
+    engine.snapshot(start + 6_000).combatState.autoAttackWarning,
+    true
+  )
+
+  engine.ingestLines([
+    line(7, 'ice boned skeleton has been charmed.')
+  ])
+
+  assert.equal(
+    engine.snapshot(start + 7_000).combatState.autoAttackWarning,
+    false
+  )
+})
+
+test('successful charm immediately enables pet damage attribution', () => {
+  const engine = new FightEngine()
+  engine.ingestLines([
+    line(0, 'ice boned skeleton hits YOU for 6 points of damage.'),
+    line(1, 'ice boned skeleton has been charmed.'),
+    line(2, 'ice boned skeleton slashes a necro theurgist for 40 points of damage.'),
+    line(3, 'A necro theurgist has been slain by ice boned skeleton!')
+  ])
+
+  const fight = engine
+    .snapshot(start + 3_000)
+    .fights.find((candidate) => candidate.petDamage === 40)
+
+  assert.ok(fight)
+  assert.equal(fight.petDamage, 40)
+})
+
+
+test('player spell cast preserves spell name for charm ownership tracking', () => {
+  const event = parseCombatLine(line(0, 'You begin casting Cajoling Whispers.'))
+  assert.equal(event?.kind, 'player-spell-cast')
+  if (event?.kind === 'player-spell-cast') {
+    assert.equal(event.spell, 'Cajoling Whispers')
+  }
+})
+
+test('generic worn-off line preserves spell and target', () => {
+  const event = parseCombatLine(
+    line(0, 'Your Cajoling Whispers spell has worn off of a dar ghoul knight.')
+  )
+  assert.equal(event?.kind, 'player-effect-worn-off')
+  if (event?.kind === 'player-effect-worn-off') {
+    assert.equal(event.spell, 'Cajoling Whispers')
+    assert.equal(event.target, 'a dar ghoul knight')
+  }
+})
+
+test('charm break returns pet to hostile state without ever targeting You', () => {
+  const engine = new FightEngine()
+
+  engine.ingestLines([
+    line(0, 'You begin casting Cajoling Whispers.'),
+    line(1, 'a dar ghoul knight has been charmed.'),
+    line(2, "A dar ghoul knight told you, 'Attacking a ghoul scribe Master.'"),
+    line(3, 'A dar ghoul knight slashes a ghoul scribe for 40 points of damage.'),
+    line(4, 'A ghoul scribe has been slain by A dar ghoul knight!'),
+    line(5, 'Your Cajoling Whispers spell has worn off of a dar ghoul knight.'),
+    line(6, 'A dar ghoul knight pierces YOU for 33 points of damage.'),
+    line(7, 'You slash a dar ghoul knight for 80 points of damage.'),
+    line(8, 'You have slain a dar ghoul knight!')
+  ])
+
+  const snapshot = engine.snapshot(start + 8_000)
+  const finalFight = snapshot.fights[snapshot.fights.length - 1]
+
+  assert.equal(finalFight.endReason, 'victory')
+  assert.equal(finalFight.targets.some((target) => /^you$/i.test(target)), false)
+  assert.equal(finalFight.petDamage, 0)
+})
+
+test('charm can break and be re-established on the same NPC', () => {
+  const engine = new FightEngine()
+
+  engine.ingestLines([
+    line(0, 'You begin casting Charm.'),
+    line(1, 'ice boned skeleton has been charmed.'),
+    line(2, 'ice boned skeleton slashes a necro theurgist for 20 points of damage.'),
+    line(3, 'Your Charm spell has worn off of ice boned skeleton.'),
+    line(4, 'Ice boned skeleton punches YOU for 6 points of damage.'),
+    line(5, 'You begin casting Charm.'),
+    line(6, 'ice boned skeleton has been charmed.'),
+    line(7, 'ice boned skeleton slashes a necro theurgist for 30 points of damage.'),
+    line(8, 'A necro theurgist has been slain by ice boned skeleton!')
+  ])
+
+  const fights = engine.snapshot(start + 8_000).fights
+  const petDamage = fights.reduce((total, fight) => total + fight.petDamage, 0)
+  assert.equal(petDamage, 50)
+})
+
+test('Riposte Critical is both preserved and counted as a critical', () => {
+  const engine = new FightEngine()
+  engine.ingestLines([
+    line(0, 'You slash a ghoul sentinel for 157 points of damage. (Riposte Critical)'),
+    line(1, 'You have slain a ghoul sentinel!')
+  ])
+
+  const slash = engine.snapshot(start + 1000).fights[0].abilities.find(
+    (ability) => ability.ability === 'Slash'
+  )
+
+  assert.ok(slash)
+  assert.equal(slash.criticalHits, 1)
+  assert.equal(slash.modifiers['Riposte Critical'], 1)
+  assert.equal(slash.modifierDamage['Riposte Critical'], 157)
+})
+
+test('Finishing Blow remains a special modifier but is not counted as a crit', () => {
+  const engine = new FightEngine()
+  engine.ingestLines([
+    line(0, 'You slash a ghoul sentinel for 194 points of damage. (Finishing Blow)'),
+    line(1, 'You have slain a ghoul sentinel!')
+  ])
+
+  const slash = engine.snapshot(start + 1000).fights[0].abilities.find(
+    (ability) => ability.ability === 'Slash'
+  )
+
+  assert.ok(slash)
+  assert.equal(slash.criticalHits, 0)
+  assert.equal(slash.modifiers['Finishing Blow'], 1)
+})

@@ -70,6 +70,8 @@ export type EncounterAbilityBreakdown = {
   hits: number
   criticalHits: number
   bestHit: number
+  modifiers?: Record<string, number>
+  modifierDamage?: Record<string, number>
 }
 
 export type EncounterBurnSegment = {
