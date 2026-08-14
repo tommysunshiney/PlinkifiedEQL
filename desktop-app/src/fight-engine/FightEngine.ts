@@ -235,6 +235,17 @@ export class FightEngine {
       case 'player-spell-cast':
         this.lastPlayerSpellCastAt = event.timestamp
         this.lastPlayerSpellName = event.spell
+
+        // Casting is intentional player activity. If incoming combat has
+        // already armed the AA warning, restart its 5-second inactivity clock
+        // from this cast rather than letting the old incoming-hit timestamp
+        // immediately re-trigger the alarm when the spell pause expires.
+        //
+        // Do not arm a warning from casting alone; only reset an existing one.
+        if (this.combatState.autoAttackWarningStartedAt !== null) {
+          this.combatState.autoAttackWarningStartedAt = event.timestamp
+        }
+
         this.pauseAutoAttackWarning(event.timestamp + DEFAULT_SPELL_CAST_PAUSE_MS)
         return
 
@@ -336,6 +347,18 @@ export class FightEngine {
     // but do refresh the NPC engagement timestamp.
     if (this.isKnownPet(event.target)) {
       this.recordActivity(event.timestamp, event.actor)
+      this.combatState.lastIncomingAttackAt = event.timestamp
+
+      // A hostile actively beating on our pet is still combat danger.
+      // Reuse the same inactivity warning rather than creating a second alarm.
+      // Existing player activity / spell grace / AA-on logic clears or pauses it.
+      if (
+        !this.combatState.feigned &&
+        this.combatState.autoAttack !== 'on' &&
+        this.combatState.autoAttackWarningStartedAt === null
+      ) {
+        this.combatState.autoAttackWarningStartedAt = event.timestamp
+      }
       return
     }
 

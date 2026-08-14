@@ -68,6 +68,8 @@ export default function DashboardPage() {
   const activeFightIdRef = useRef<string | null>(null)
   const ohShitResetTimerRef = useRef<number | null>(null)
   const autoAttackAudioRef = useRef<HTMLAudioElement | null>(null)
+  const alarmRetryTimerRef = useRef<number | null>(null)
+  const alarmTestTimerRef = useRef<number | null>(null)
   const fartMarkerWrittenRef = useRef(false)
   const alarmSoundInputRef = useRef<HTMLInputElement>(null)
 
@@ -87,6 +89,12 @@ export default function DashboardPage() {
     return () => {
       if (ohShitResetTimerRef.current !== null) {
         window.clearTimeout(ohShitResetTimerRef.current)
+      }
+      if (alarmRetryTimerRef.current !== null) {
+        window.clearTimeout(alarmRetryTimerRef.current)
+      }
+      if (alarmTestTimerRef.current !== null) {
+        window.clearTimeout(alarmTestTimerRef.current)
       }
     }
   }, [])
@@ -109,6 +117,53 @@ export default function DashboardPage() {
     })
     reader.readAsDataURL(file)
     event.target.value = ''
+  }
+
+  useEffect(() => {
+    const previous = autoAttackAudioRef.current
+    if (previous) {
+      previous.pause()
+      previous.currentTime = 0
+    }
+
+    const audio = new Audio(alarmSoundUrl)
+    audio.preload = 'auto'
+    audio.loop = true
+    audio.volume = 1
+    audio.load()
+    autoAttackAudioRef.current = audio
+
+    return () => {
+      audio.pause()
+      audio.currentTime = 0
+      if (autoAttackAudioRef.current === audio) {
+        autoAttackAudioRef.current = null
+      }
+    }
+  }, [alarmSoundUrl])
+
+  function handleTestAlarmSound() {
+    const audio = autoAttackAudioRef.current
+    if (!audio) return
+
+    if (alarmTestTimerRef.current !== null) {
+      window.clearTimeout(alarmTestTimerRef.current)
+    }
+
+    audio.pause()
+    audio.currentTime = 0
+
+    void audio.play().catch((error) => {
+      console.error('Alarm sound test failed:', error)
+    })
+
+    alarmTestTimerRef.current = window.setTimeout(() => {
+      if (!fightState.combatState.autoAttackWarning) {
+        audio.pause()
+        audio.currentTime = 0
+      }
+      alarmTestTimerRef.current = null
+    }, 2200)
   }
 
   function toggleAlarm() {
@@ -331,9 +386,15 @@ export default function DashboardPage() {
   const autoAttackWarning = alarmEnabled && engineAutoAttackWarning
 
   useEffect(() => {
+    if (alarmRetryTimerRef.current !== null) {
+      window.clearTimeout(alarmRetryTimerRef.current)
+      alarmRetryTimerRef.current = null
+    }
+
+    const audio = autoAttackAudioRef.current
+
     if (!autoAttackWarning) {
       fartMarkerWrittenRef.current = false
-      const audio = autoAttackAudioRef.current
       if (audio) {
         audio.pause()
         audio.currentTime = 0
@@ -348,20 +409,34 @@ export default function DashboardPage() {
       })
     }
 
-    const audio = new Audio(alarmSoundUrl)
+    if (!audio) return
+
     audio.loop = true
     audio.volume = 1
-    autoAttackAudioRef.current = audio
-    void audio.play().catch((error) => {
-      console.error('Auto-attack warning sound failed:', error)
-    })
+    audio.currentTime = 0
+
+    const tryPlay = () => {
+      void audio.play().catch((error) => {
+        console.error('Auto-attack warning sound failed:', error)
+      })
+    }
+
+    tryPlay()
+
+    // One short retry handles an Audio element that was still decoding/loading
+    // when the warning transition occurred. Visual state remains authoritative.
+    alarmRetryTimerRef.current = window.setTimeout(() => {
+      if (audio.paused) tryPlay()
+      alarmRetryTimerRef.current = null
+    }, 350)
 
     return () => {
-      audio.pause()
-      audio.currentTime = 0
-      if (autoAttackAudioRef.current === audio) autoAttackAudioRef.current = null
+      if (alarmRetryTimerRef.current !== null) {
+        window.clearTimeout(alarmRetryTimerRef.current)
+        alarmRetryTimerRef.current = null
+      }
     }
-  }, [alarmSoundUrl, autoAttackWarning, selectedLog])
+  }, [autoAttackWarning, selectedLog])
 
   const displayedAbilityRows = displayedFight?.abilities.slice().sort((a,b)=>b.damage-a.damage) ?? []
   const petCombatants = displayedFight?.combatants.filter((combatant) => combatant.type === 'pet') ?? []
@@ -415,6 +490,14 @@ export default function DashboardPage() {
             title={`Current alarm: ${alarmSoundName}`}
           >
             Alarm Sound
+          </button>
+
+          <button
+            className="select-button"
+            onClick={handleTestAlarmSound}
+            title="Play the currently selected alarm sound for about two seconds"
+          >
+            Test Alarm
           </button>
 
           <button

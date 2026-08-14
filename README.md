@@ -8,7 +8,7 @@ Tommy Sunshine
 
 (Project Lead)
 
-with development assistance from ChatGPT.
+with development assistance from ChatGPT, aka Plinky.
 
 ## Vision
 

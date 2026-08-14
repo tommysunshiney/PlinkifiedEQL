@@ -798,3 +798,96 @@ test('Finishing Blow remains a special modifier but is not counted as a crit', (
   assert.equal(slash.criticalHits, 0)
   assert.equal(slash.modifiers['Finishing Blow'], 1)
 })
+
+
+test('casting resets an armed AA warning inactivity clock', () => {
+  const engine = new FightEngine()
+
+  engine.ingestLines([
+    line(0, 'Auto attack is off.'),
+    line(1, 'an elemental warrior hits YOU for 40 points of damage.')
+  ])
+
+  assert.equal(
+    engine.snapshot(start + 6_000).combatState.autoAttackWarning,
+    true
+  )
+
+  engine.ingestLines([
+    line(7, 'You begin casting Tashania.')
+  ])
+
+  assert.equal(
+    engine.snapshot(start + 11_000).combatState.autoAttackWarning,
+    false
+  )
+
+  assert.equal(
+    engine.snapshot(start + 15_100).combatState.autoAttackWarning,
+    true
+  )
+})
+
+test('repeated casting keeps AA warning quiet during active recovery', () => {
+  const engine = new FightEngine()
+
+  engine.ingestLines([
+    line(0, 'Auto attack is off.'),
+    line(1, 'an elemental warrior hits YOU for 40 points of damage.'),
+    line(4, 'You begin casting Tashania.'),
+    line(6, 'an elemental warrior hits YOU for 35 points of damage.'),
+    line(8, 'You begin casting Cajoling Whispers.'),
+    line(10, 'an elemental warrior hits YOU for 30 points of damage.'),
+    line(12, 'You begin casting Cajoling Whispers.')
+  ])
+
+  assert.equal(
+    engine.snapshot(start + 16_000).combatState.autoAttackWarning,
+    false
+  )
+
+  assert.equal(
+    engine.snapshot(start + 20_100).combatState.autoAttackWarning,
+    true
+  )
+})
+
+
+test('incoming attacks against known pet arm inactivity warning', () => {
+  const engine = new FightEngine()
+
+  engine.ingestLines([
+    line(0, "Kasn told you, 'Attacking a rock golem Master.'"),
+    line(1, 'A rock golem hits Kasn for 40 points of damage.')
+  ])
+
+  assert.equal(
+    engine.snapshot(start + 5_900).combatState.autoAttackWarning,
+    false
+  )
+
+  assert.equal(
+    engine.snapshot(start + 6_100).combatState.autoAttackWarning,
+    true
+  )
+})
+
+test('casting activity suppresses pet-under-attack warning during recovery', () => {
+  const engine = new FightEngine()
+
+  engine.ingestLines([
+    line(0, "Kasn told you, 'Attacking a rock golem Master.'"),
+    line(1, 'A rock golem hits Kasn for 40 points of damage.'),
+    line(4, 'You begin casting Greater Healing.')
+  ])
+
+  assert.equal(
+    engine.snapshot(start + 11_900).combatState.autoAttackWarning,
+    false
+  )
+
+  assert.equal(
+    engine.snapshot(start + 12_100).combatState.autoAttackWarning,
+    true
+  )
+})

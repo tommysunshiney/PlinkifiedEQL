@@ -201,12 +201,12 @@ export default function AdventureJournalPage() {
   const [bossResults, setBossResults] = useState<BossRecord[]>([])
   const [bossSearchMessage, setBossSearchMessage] = useState('')
   const {
-    selectedLog,
-    sessionLines,
-    isConnected,
-    journalRevision,
-    encounterRevision,
-  } = useSession()
+	selectedLog,
+	sessionLines,
+	isConnected,
+	journalRevision,
+	encounterRevision,
+		} = useSession()
 
   async function refreshJournal() {
     try {
@@ -232,16 +232,6 @@ export default function AdventureJournalPage() {
   useEffect(() => {
     void refreshJournal()
   }, [journalRevision, encounterRevision])
-
-  useEffect(() => {
-    if (!isConnected) return
-
-    const timer = window.setTimeout(() => {
-      void refreshJournal()
-    }, 250)
-
-    return () => window.clearTimeout(timer)
-  }, [sessionLines.length, isConnected])
 
   async function handleBossSearch() {
     const query = bossQuery.trim()
@@ -296,6 +286,18 @@ export default function AdventureJournalPage() {
 
     return groups
   }, [visibleEntries])
+
+  const encounterForEntryId = useMemo(() => {
+    const matches = new Map<number, EncounterRecord>()
+
+    for (const entry of entries) {
+      if (entry.entryType !== 'fight' && entry.entryType !== 'named') continue
+      const encounter = encounterForEntryId.get(entry.id) ?? null
+      if (encounter) matches.set(entry.id, encounter)
+    }
+
+    return matches
+  }, [entries, encounters])
 
   const lootCount = entries.filter(
     (entry) => entry.entryType === 'loot'
@@ -403,7 +405,7 @@ export default function AdventureJournalPage() {
                 <section className="journal-day-group" key={group.label}>
                   <h4 className="journal-day-heading">{group.label}</h4>
                   {group.entries.map((entry) => {
-                    const encounter = findEncounterForEntry(entry, encounters)
+                    const encounter = encounterForEntryId.get(entry.id) ?? null
                     const clickable = encounter !== null
                     const selected = selectedEncounter?.id === encounter?.id
 
