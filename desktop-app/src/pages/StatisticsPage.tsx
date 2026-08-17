@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { EncounterAbilityBreakdown, EncounterRecord } from '../types/database'
 import '../App.css'
+import PeqlLoading from '../components/PeqlLoading'
 
 const triggered = new Set([
   'ykesha','blood siphon strike','blood draw strike','asp venom strike',
@@ -32,24 +33,65 @@ function dur(ms: number) {
 
 export default function StatisticsPage() {
   const [rows, setRows] = useState<EncounterRecord[]>([])
+  const [detailRows, setDetailRows] = useState<EncounterRecord[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadingStage, setLoadingStage] = useState('Opening combat history…')
+  const [loadTiming, setLoadTiming] = useState('')
   const [error, setError] = useState('')
 
   useEffect(() => {
     let dead = false
-    window.electronAPI.listEncounters(5000)
-      .then((records) => { if (!dead) setRows(records) })
-      .catch((e) => {
+    const startedAt = performance.now()
+
+    async function loadStatistics() {
+      try {
+        setLoadingStage('Reading saved fight summaries…')
+        const summaries =
+          await window.electronAPI.listCombatStatsSummaries(5000)
+
+        if (dead) return
+        setRows(summaries)
+
+        // Yield one paint so the user sees responsive progress instead of
+        // a frozen-looking page while detail JSON is fetched.
+        setLoadingStage('Loading recent ability detail…')
+        await new Promise<void>((resolve) =>
+          window.requestAnimationFrame(() => resolve())
+        )
+
+        const details = await window.electronAPI.listEncounters(750)
+        if (dead) return
+
+        setDetailRows(details)
+        setLoadingStage('Building statistics…')
+
+        await new Promise<void>((resolve) =>
+          window.requestAnimationFrame(() => resolve())
+        )
+
+        if (dead) return
+        setLoadTiming(
+          `Loaded in ${Math.round(performance.now() - startedAt)} ms`
+        )
+      } catch (e) {
         console.error(e)
         if (!dead) setError('Unable to load combat analytics.')
-      })
-      .finally(() => { if (!dead) setLoading(false) })
-    return () => { dead = true }
+      } finally {
+        if (!dead) setLoading(false)
+      }
+    }
+
+    void loadStatistics()
+    return () => {
+      dead = true
+    }
   }, [])
 
   const a = useMemo(() => {
     const fights = rows.filter((x) => x.outcome === 'victory')
-    const covered = fights.filter((x) => x.abilities.length)
+    const covered = detailRows.filter(
+      (x) => x.outcome === 'victory' && x.abilities.length
+    )
     const total = fights.reduce((n, x) => n + x.totalDamage, 0)
     const time = fights.reduce((n, x) => n + x.durationMs, 0)
     const kills = fights.reduce((n, x) => n + x.mobKillCount, 0)
@@ -144,10 +186,19 @@ export default function StatisticsPage() {
         .sort((x, y) => y.fights - x.fights)
         .slice(0, 10)
     }
-  }, [rows])
+  }, [rows, detailRows])
 
   if (loading) {
-    return <div className="analytics-page"><h2>Combat Analytics</h2><p>Loading persisted fights...</p></div>
+    return (
+      <div className="analytics-page">
+        <h2>Combat Analytics</h2>
+        <PeqlLoading
+          title="Loading Statistics"
+          stage={loadingStage}
+          detail="PEQL is keeping the heavy fight details in SQLite until they are actually needed."
+        />
+      </div>
+    )
   }
 
   return (
@@ -164,8 +215,8 @@ export default function StatisticsPage() {
       {error && <div className="connection-warning">{error}</div>}
 
       <div className="analytics-coverage">
-        <strong>Ability detail:</strong> {a.covered.length} of {a.fights.length} completed fights.
-        Older fights still count in totals; modifiers populate as fights are saved/replayed with v1.1.
+        <strong>Ability detail:</strong> {a.covered.length} recent detailed fights loaded.
+        All {a.fights.length} saved victories still count in totals. {loadTiming}
       </div>
 
       <div className="analytics-summary-grid">

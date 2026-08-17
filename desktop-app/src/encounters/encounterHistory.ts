@@ -4,7 +4,7 @@ import type {
   EncounterInput
 } from '../types/database'
 
-type ZoneContext = {
+export type ZoneContext = {
   zoneName?: string
   zoneDetail?: string
 }
@@ -29,6 +29,34 @@ function normalizeCombatName(value: string): string {
 
 function cleanZone(value: string): string {
   return value.trim().replace(/\.$/, '').trim()
+}
+
+export function zoneContextFromLine(line: string): ZoneContext | null {
+  let match = line.match(/You have entered (.+?) (\d+) \((.+?)\)\.?$/i)
+  if (match) {
+    return {
+      zoneName: cleanZone(match[1]),
+      zoneDetail: `${match[3].trim()} tier (+${match[2]})`
+    }
+  }
+
+  match = line.match(/You have entered (.+?) - Solo\.?$/i)
+  if (match) {
+    return {
+      zoneName: cleanZone(match[1]),
+      zoneDetail: 'Solo'
+    }
+  }
+
+  match = line.match(/You have entered (.+?)\.?$/i)
+  if (match) {
+    return {
+      zoneName: cleanZone(match[1]),
+      zoneDetail: undefined
+    }
+  }
+
+  return null
 }
 
 function zoneContextAt(lines: string[], timestamp: number): ZoneContext {
@@ -108,6 +136,24 @@ function encounterActions(
       continue
     }
 
+    if (/\]\s+You mend your wounds and heal some damage\.\s*$/i.test(line)) {
+      actions.push({
+        offsetMs: timestamp - startedAt,
+        kind: 'ability',
+        name: 'Mend'
+      })
+      continue
+    }
+
+    if (/\]\s+(?:Whittler|You) has fallen to the ground\.\s*$/i.test(line)) {
+      actions.push({
+        offsetMs: timestamp - startedAt,
+        kind: 'ability',
+        name: 'Feign Death'
+      })
+      continue
+    }
+
     let match = line.match(/\]\s+You begin casting (.+?)\.\s*$/i)
     if (match) {
       actions.push({
@@ -139,7 +185,7 @@ function encounterActions(
     }
 
     match = line.match(
-      /\]\s+You (backstab|reave|bash|kick|strike|maul|bite|claw) .+?(?: for \d+ points? of damage| for \d+ points? damage|, but)/i
+      /\]\s+You (backstab|reave|bash|kick|strike|smite|maul|bite|claw) .+?(?: for \d+ points? of damage| for \d+ points? damage|, but)/i
     )
     if (match) {
       actions.push({
@@ -245,7 +291,8 @@ function encounterActions(
 
 export function encountersFromFights(
   lines: string[],
-  fights: FightSnapshot[]
+  fights: FightSnapshot[],
+  fallbackZone?: ZoneContext
 ): EncounterInput[] {
   return fights
     .filter(
@@ -256,7 +303,16 @@ export function encountersFromFights(
     )
     .map((fight) => {
       const endedAt = fight.endedAt ?? fight.lastActivityAt
-      const context = zoneContextAt(lines, fight.startedAt)
+      const confirmedContext = zoneContextAt(lines, fight.startedAt)
+      const context =
+        confirmedContext.zoneName || !fallbackZone?.zoneName
+          ? confirmedContext
+          : {
+              zoneName: fallbackZone.zoneName,
+              zoneDetail: fallbackZone.zoneDetail
+                ? `${fallbackZone.zoneDetail} · Last known zone (unconfirmed after reconnect)`
+                : 'Last known zone (unconfirmed after reconnect)'
+            }
 
       const primaryNpcName =
         fight.targets.find((target) => !/\spet$/i.test(target)) ??

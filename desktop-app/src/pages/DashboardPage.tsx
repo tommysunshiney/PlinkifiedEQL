@@ -9,6 +9,7 @@ import '../App.css'
 import { EventType, parseLine } from '../parser'
 import { useSession } from '../session/SessionContext'
 import { QuickPlayerNote } from '../journal/QuickPlayerNote'
+import type { NoteEncounterOption } from '../journal/QuickPlayerNote'
 import autoAttackFartUrl from '../assets/auto-attack-fart.mp3'
 
 const categoryLabels: Record<EventType, string> = {
@@ -62,6 +63,7 @@ export default function DashboardPage() {
   const [alarmEnabled, setAlarmEnabled] = useState(
     () => localStorage.getItem(ALARM_ENABLED_KEY) !== 'false'
   )
+  const [lastEqlInputActivityAt, setLastEqlInputActivityAt] = useState(0)
 
   const logOutputRef = useRef<HTMLDivElement>(null)
   const selectingLogRef = useRef(false)
@@ -84,6 +86,12 @@ export default function DashboardPage() {
         ),
     [sessionLines]
   )
+
+  useEffect(() => {
+    window.electronAPI.onEqlInputActivity((timestamp) => {
+      setLastEqlInputActivityAt(timestamp)
+    })
+  }, [])
 
   useEffect(() => {
     return () => {
@@ -250,6 +258,29 @@ export default function DashboardPage() {
   const fightHistory = fightState.fights
   const newestFight = fightState.currentFight ?? fightHistory[fightHistory.length - 1] ?? null
 
+  const noteEncounterOptions = useMemo<NoteEncounterOption[]>(() => {
+    const options: NoteEncounterOption[] = []
+    const seen = new Set<string>()
+
+    const completed = fightHistory
+      .filter((fight) => !fight.active)
+      .slice()
+      .reverse()
+
+    for (const fight of completed) {
+      if (seen.has(fight.id)) continue
+      seen.add(fight.id)
+      options.push({
+        id: fight.id,
+        target: fight.target,
+        label: `Recent Fight ${options.length + 1}`
+      })
+      if (options.length >= 5) break
+    }
+
+    return options
+  }, [fightHistory])
+
   useEffect(() => {
     const activeFightId = newestFight?.active ? newestFight.id : null
     if (activeFightId !== null && activeFightIdRef.current !== activeFightId) {
@@ -383,7 +414,13 @@ export default function DashboardPage() {
   ]
 
   const engineAutoAttackWarning = fightState.combatState.autoAttackWarning
-  const autoAttackWarning = alarmEnabled && engineAutoAttackWarning
+  const focusedEqlInputGrace =
+    lastEqlInputActivityAt > 0 &&
+    Date.now() - lastEqlInputActivityAt < 4_000
+  const autoAttackWarning =
+    alarmEnabled &&
+    engineAutoAttackWarning &&
+    !focusedEqlInputGrace
 
   useEffect(() => {
     if (alarmRetryTimerRef.current !== null) {
@@ -504,12 +541,17 @@ export default function DashboardPage() {
             className="select-button"
             onClick={toggleAlarm}
             aria-pressed={alarmEnabled}
-            title="Turn the Swing / Auto Attack alarm on or off"
+            title={
+              alarmEnabled
+                ? 'Swing warning is ARMED. Click to mute it.'
+                : 'Swing warning is MUTED. Click to arm it.'
+            }
             style={{
-              background: alarmEnabled ? '#2d78b7' : '#4a5360'
+              background: alarmEnabled ? '#2d78b7' : '#4a5360',
+              fontWeight: 800
             }}
           >
-            Swing Alarm: {alarmEnabled ? 'ON' : 'OFF'}
+            Alarm: {alarmEnabled ? '🟢 ARMED' : '🔇 MUTED'}
           </button>
 
           <button className="select-button" onClick={handleNewSession}>
@@ -550,6 +592,7 @@ export default function DashboardPage() {
           zoneName={latestZoneName}
           activeEncounterId={fightState.currentFight?.id}
           activeEncounterTarget={fightState.currentFight?.target}
+          recentEncounters={noteEncounterOptions}
           onSaved={() => {
             // Adventure Journal reads persisted notes from SQLite.
           }}
@@ -563,7 +606,7 @@ export default function DashboardPage() {
             {logLines.length.toLocaleString()} recent lines loaded
           </span>
           <span className="alarm-sound-name" title={alarmSoundName}>
-            Alarm: {alarmEnabled ? alarmSoundName : 'OFF'}
+            Alarm: {alarmEnabled ? `ARMED · ${alarmSoundName}` : 'MUTED'}
           </span>
         </div>
 

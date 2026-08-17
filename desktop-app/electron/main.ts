@@ -2,12 +2,17 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import * as fs from 'node:fs/promises'
+import { spawn } from 'node:child_process'
 import { watchFile, unwatchFile } from 'node:fs'
 import {
   closeDatabase,
   getDatabaseStatus,
   initializeDatabase,
   listEncounters,
+  listEncounterSummaries,
+  listCombatStatsSummaries,
+  getEncounterById,
+  getEncounterBySourceKey,
   listJournalEntries,
   saveEncounters,
   saveJournalEntries,
@@ -90,6 +95,65 @@ ipcMain.handle(
   (_, limit?: number) => listPlayerNotes(limit)
 )
 
+function formatPlayerNotesExport() {
+  const notes = listPlayerNotes(50_000)
+
+  const lines = [
+    'PLINKIFIED EQL — PLAYER NOTES',
+    `Exported: ${new Date().toLocaleString()}`,
+    `Notes: ${notes.length}`,
+    '='.repeat(72),
+    ''
+  ]
+
+  for (const note of notes) {
+    lines.push(`[${new Date(note.createdAt).toLocaleString()}]`)
+    if (note.zoneName) lines.push(`Zone: ${note.zoneName}`)
+    if (note.encounterTitle) lines.push(`Encounter: ${note.encounterTitle}`)
+    else if (note.encounterSourceKey) lines.push('Encounter: linked encounter')
+    else lines.push('Context: Session / General')
+    lines.push(note.noteText)
+    lines.push('-'.repeat(72))
+    lines.push('')
+  }
+
+  return { notes, text: lines.join('\r\n') }
+}
+
+ipcMain.handle('player-notes:export', async () => {
+  const { notes, text } = formatPlayerNotesExport()
+  const date = new Date().toISOString().slice(0, 10)
+
+  const result = win
+    ? await dialog.showSaveDialog(win, {
+        title: 'Export PEQL Player Notes',
+        defaultPath: path.join(
+          app.getPath('documents'),
+          `PEQL-NOTES-${date}.txt`
+        ),
+        filters: [{ name: 'Text Files', extensions: ['txt'] }]
+      })
+    : await dialog.showSaveDialog({
+        title: 'Export PEQL Player Notes',
+        defaultPath: path.join(
+          app.getPath('documents'),
+          `PEQL-NOTES-${date}.txt`
+        ),
+        filters: [{ name: 'Text Files', extensions: ['txt'] }]
+      })
+
+  if (result.canceled || !result.filePath) {
+    return { canceled: true, count: notes.length }
+  }
+
+  await fs.writeFile(result.filePath, text, 'utf8')
+  return {
+    canceled: false,
+    filePath: result.filePath,
+    count: notes.length
+  }
+})
+
 ipcMain.handle(
   'encounters:save',
   (
@@ -103,6 +167,26 @@ ipcMain.handle(
 ipcMain.handle(
   'encounters:list',
   (_, limit?: number) => listEncounters(limit)
+)
+
+ipcMain.handle(
+  'encounters:listSummaries',
+  (_, limit?: number) => listEncounterSummaries(limit)
+)
+
+ipcMain.handle(
+  'encounters:listCombatStatsSummaries',
+  (_, limit?: number) => listCombatStatsSummaries(limit)
+)
+
+ipcMain.handle(
+  'encounters:getById',
+  (_, id: number) => getEncounterById(id)
+)
+
+ipcMain.handle(
+  'encounters:getBySourceKey',
+  (_, sourceKey: string) => getEncounterBySourceKey(sourceKey)
 )
 
 ipcMain.handle('external:open', async (_, url: string) => {
@@ -292,6 +376,148 @@ ipcMain.handle('log:fart', async (_, filePath: string) => {
   return { success: true, marker }
 })
 
+
+let eqlInputMonitor: ReturnType<typeof spawn> | null = null
+let eqlInputMonitorBuffer = ''
+
+const EQL_INPUT_MONITOR_SCRIPT = String.raw` 
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class PeqlInputMonitor {
+  [StructLayout(LayoutKind.Sequential)]
+  public struct LASTINPUTINFO {
+    public uint cbSize;
+    public uint dwTime;
+  }
+
+  [DllImport("user32.dll")]
+  public static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
+
+  [DllImport("user32.dll")]
+  public static extern IntPtr GetForegroundWindow();
+
+  [DllImport("user32.dll")]
+  public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+  public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+}
+"@
+
+$lastTick = [uint32]0
+$lastEmit = [int64]0
+
+while ($true) {
+  $info = New-Object PeqlInputMonitor+LASTINPUTINFO
+  $info.cbSize = [Runtime.InteropServices.Marshal]::SizeOf($info)
+
+  if ([PeqlInputMonitor]::GetLastInputInfo([ref]$info)) {
+    if ($info.dwTime -ne $lastTick) {
+      $hwnd = [PeqlInputMonitor]::GetForegroundWindow()
+      [uint32]$foregroundPid = 0
+      [PeqlInputMonitor]::GetWindowThreadProcessId(
+        $hwnd,
+        [ref]$foregroundPid
+      ) | Out-Null
+
+      $titleBuilder = New-Object System.Text.StringBuilder 512
+      [PeqlInputMonitor]::GetWindowText(
+        $hwnd,
+        $titleBuilder,
+        512
+      ) | Out-Null
+      $title = $titleBuilder.ToString()
+
+      $processName = ''
+      try {
+        $processName = (
+          Get-Process -Id $foregroundPid -ErrorAction Stop
+        ).ProcessName
+      } catch {}
+
+      $isEverQuest =
+        ($processName -match '^eqgame$') -or
+        ($title -match 'EverQuest')
+
+      $now = [Environment]::TickCount64
+      if ($isEverQuest -and (($now - $lastEmit) -ge 500)) {
+        Write-Output 'PEQL_INPUT'
+        [Console]::Out.Flush()
+        $lastEmit = $now
+      }
+
+      $lastTick = $info.dwTime
+    }
+  }
+
+  Start-Sleep -Milliseconds 150
+}
+`
+
+function startEqlInputMonitor() {
+  if (process.platform !== 'win32' || eqlInputMonitor) return
+
+  try {
+    eqlInputMonitor = spawn(
+      'powershell.exe',
+      [
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-Command',
+        EQL_INPUT_MONITOR_SCRIPT
+      ],
+      {
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe']
+      }
+    )
+
+    eqlInputMonitor.stdout?.setEncoding('utf8')
+    eqlInputMonitor.stdout?.on('data', (chunk: string) => {
+      eqlInputMonitorBuffer += chunk
+      const lines = eqlInputMonitorBuffer.split(/\r?\n/)
+      eqlInputMonitorBuffer = lines.pop() ?? ''
+
+      for (const line of lines) {
+        if (line.trim() !== 'PEQL_INPUT') continue
+        if (!win || win.webContents.isDestroyed()) continue
+        win.webContents.send('eql:input-activity', Date.now())
+      }
+    })
+
+    eqlInputMonitor.stderr?.setEncoding('utf8')
+    eqlInputMonitor.stderr?.on('data', (chunk: string) => {
+      const warning = chunk.trim()
+      if (warning) console.warn('EQL input monitor:', warning)
+    })
+
+    eqlInputMonitor.on('exit', () => {
+      eqlInputMonitor = null
+      eqlInputMonitorBuffer = ''
+    })
+  } catch (error) {
+    console.warn(
+      'Unable to start optional EQL input monitor:',
+      error
+    )
+    eqlInputMonitor = null
+  }
+}
+
+function stopEqlInputMonitor() {
+  if (!eqlInputMonitor) return
+
+  eqlInputMonitor.kill()
+  eqlInputMonitor = null
+  eqlInputMonitorBuffer = ''
+}
+
 function createWindow() {
   win = new BrowserWindow({
     icon: path.join(process.env.VITE_PUBLIC, 'electron-vite.svg'),
@@ -315,6 +541,7 @@ function createWindow() {
 }
 
 app.on('before-quit', () => {
+  stopEqlInputMonitor()
   closeDatabase()
 })
 
@@ -391,4 +618,5 @@ app.whenReady().then(() => {
   const status = initializeDatabase()
   console.log(`PEQL database ready: ${status.path}`)
   createWindow()
+  startEqlInputMonitor()
 })

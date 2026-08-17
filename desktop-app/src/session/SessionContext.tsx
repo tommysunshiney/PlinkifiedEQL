@@ -7,7 +7,11 @@ import {
   useRef,
   useState
 } from 'react'
-import { encountersFromFights } from '../encounters/encounterHistory'
+import {
+  encountersFromFights,
+  zoneContextFromLine
+} from '../encounters/encounterHistory'
+import type { ZoneContext } from '../encounters/encounterHistory'
 import { FightEngine } from '../fight-engine'
 import type {
   FightEngineSnapshot,
@@ -17,6 +21,45 @@ import { journalEntriesFromLines } from '../journal/journalEntries'
 
 const SESSION_MARKER = '===== PEQL SESSION START'
 const LAST_LOG_KEY = 'peql:last-selected-log'
+const LAST_ZONE_KEY_PREFIX = 'peql:last-known-zone:'
+
+function lastZoneKey(filePath: string): string {
+  return `${LAST_ZONE_KEY_PREFIX}${filePath.toLocaleLowerCase()}`
+}
+
+function readLastKnownZone(filePath: string): ZoneContext | undefined {
+  if (!filePath) return undefined
+
+  try {
+    const raw = window.localStorage.getItem(lastZoneKey(filePath))
+    if (!raw) return undefined
+
+    const parsed = JSON.parse(raw) as ZoneContext
+    return parsed?.zoneName ? parsed : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function rememberLastKnownZone(
+  filePath: string,
+  lines: string[]
+): ZoneContext | undefined {
+  if (!filePath || lines.length === 0) return readLastKnownZone(filePath)
+
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const context = zoneContextFromLine(lines[index])
+    if (!context?.zoneName) continue
+
+    window.localStorage.setItem(
+      lastZoneKey(filePath),
+      JSON.stringify(context)
+    )
+    return context
+  }
+
+  return readLastKnownZone(filePath)
+}
 
 export type MarkerResult = {
   success: boolean
@@ -165,7 +208,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
     if (candidates.length === 0) return
 
-    const encounters = encountersFromFights(lines, candidates)
+    const encounters = encountersFromFights(
+      lines,
+      candidates,
+      readLastKnownZone(filePath)
+    )
     if (encounters.length === 0) return
 
     try {
@@ -207,6 +254,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
       const filePath = selectedLogRef.current
       if (filePath) {
+        rememberLastKnownZone(filePath, newLines)
         void persistJournalLines(filePath, newLines)
         void persistCompletedFights(
           filePath,
@@ -244,6 +292,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       // log:read is now a bounded recent-tail read, never a full-file load.
       const recentLines = await window.electronAPI.readLogFile(filePath)
       rememberLatestLogTimestamp(recentLines)
+      rememberLastKnownZone(filePath, recentLines)
 
       selectedLogRef.current = filePath
       logLinesRef.current = recentLines

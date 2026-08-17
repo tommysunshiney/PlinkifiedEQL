@@ -7,6 +7,7 @@ import AdventureJournalPage from './pages/AdventureJournalPage'
 import LiveLogPage from './pages/LiveLogPage'
 import ParserLabPage from './pages/ParserLabPage'
 import StatisticsPage from './pages/StatisticsPage'
+import TimersPage from './pages/TimersPage'
 import SettingsPage from './pages/SettingsPage'
 import PageErrorBoundary from './components/PageErrorBoundary'
 
@@ -16,6 +17,7 @@ export type AppPage =
   | 'livelog'
   | 'parser'
   | 'statistics'
+  | 'timers'
   | 'settings'
 
 export default function App() {
@@ -38,6 +40,9 @@ export default function App() {
 
       case 'statistics':
         return <StatisticsPage />
+
+      case 'timers':
+        return <TimersPage />
 
       case 'settings':
         return <SettingsPage />

@@ -27,18 +27,34 @@ declare global {
       listPlayerNotes: (
         limit?: number
       ) => Promise<PlayerNoteRecord[]>
+      exportPlayerNotes: () => Promise<{
+        canceled: boolean
+        filePath?: string
+        count: number
+      }>
       saveEncounters: (
         logFilePath: string,
         encounters: EncounterInput[],
         mode?: 'live' | 'replay'
       ) => Promise<number>
       listEncounters: (limit?: number) => Promise<EncounterRecord[]>
+      listEncounterSummaries: (
+        limit?: number
+      ) => Promise<EncounterRecord[]>
+      listCombatStatsSummaries: (
+        limit?: number
+      ) => Promise<EncounterRecord[]>
+      getEncounterById: (id: number) => Promise<EncounterRecord | null>
+      getEncounterBySourceKey: (
+        sourceKey: string
+      ) => Promise<EncounterRecord | null>
       openExternal: (url: string) => Promise<void>
       selectLogFile: () => Promise<string | null>
       readLogFile: (filePath: string) => Promise<string[]>
       startLogWatch: (filePath: string) => Promise<void>
       stopLogWatch: () => Promise<void>
       onLogLines: (callback: (lines: string[]) => void) => void
+      onEqlInputActivity: (callback: (timestamp: number) => void) => void
 
       startNewSession: (
         filePath: string

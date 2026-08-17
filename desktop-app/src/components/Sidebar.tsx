@@ -11,6 +11,15 @@ export default function Sidebar({
 }: Props) {
   return (
     <aside className="sidebar">
+      <button
+        className={currentPage === 'timers'
+          ? 'active'
+          : ''}
+        onClick={() => onNavigate('timers')}
+      >
+        ⏱ Timers
+      </button>
+
 
       <button
         className={currentPage === 'dashboard'

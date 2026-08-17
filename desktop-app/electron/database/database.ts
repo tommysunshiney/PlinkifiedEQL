@@ -654,6 +654,229 @@ export function saveEncounters(
   return saveAll(encounters)
 }
 
+export function listCombatStatsSummaries(
+  limit = 5000
+): EncounterRecord[] {
+  if (!database) throw new Error('PEQL database is not initialized.')
+
+  const safeLimit = Math.max(1, Math.min(10000, Math.trunc(limit)))
+
+  const rows = database
+    .prepare(`
+      SELECT
+        id,
+        session_id,
+        source_key,
+        encounter_title,
+        primary_npc_name,
+        primary_named_mob_id,
+        zone_name,
+        zone_detail,
+        started_at,
+        ended_at,
+        duration_ms,
+        total_damage,
+        player_damage,
+        pet_damage,
+        dps,
+        best_hit,
+        mob_kill_count,
+        end_reason,
+        outcome
+      FROM encounters
+      ORDER BY started_at DESC, id DESC
+      LIMIT ?
+    `)
+    .all(safeLimit)
+
+  return rows.map((row: unknown) => {
+    const value = row as Record<string, unknown>
+    return {
+      id: Number(value.id),
+      sessionId: Number(value.session_id),
+      sourceKey: String(value.source_key ?? ''),
+      encounterTitle: String(value.encounter_title),
+      primaryNpcName: String(value.primary_npc_name ?? value.encounter_title),
+      zoneName: value.zone_name ? String(value.zone_name) : undefined,
+      zoneDetail: value.zone_detail ? String(value.zone_detail) : undefined,
+      startedAt: String(value.started_at),
+      endedAt: String(value.ended_at),
+      durationMs: Number(value.duration_ms ?? 0),
+      totalDamage: Number(value.total_damage ?? 0),
+      playerDamage: Number(value.player_damage ?? 0),
+      petDamage: Number(value.pet_damage ?? 0),
+      dps: Number(value.dps ?? 0),
+      bestHit: Number(value.best_hit ?? 0),
+      mobKillCount: Number(value.mob_kill_count ?? 0),
+      endReason: String(value.end_reason ?? 'timeout'),
+      outcome: value.outcome === 'victory' ? 'victory' : 'failed',
+      actions: [],
+      mobs: [],
+      abilities: [],
+      attemptNumber: 1,
+      namedMobId: value.primary_named_mob_id
+        ? Number(value.primary_named_mob_id)
+        : null,
+      namedTitle: null,
+      wikiUrl: null
+    } as EncounterRecord
+  })
+}
+
+export function listEncounterSummaries(
+  limit = 500
+): EncounterRecord[] {
+  if (!database) throw new Error('PEQL database is not initialized.')
+
+  const safeLimit = Math.max(1, Math.min(5000, Math.trunc(limit)))
+
+  const rows = database
+    .prepare(`
+      SELECT
+        e.id,
+        e.session_id,
+        e.source_key,
+        e.encounter_title,
+        e.primary_npc_name,
+        e.primary_named_mob_id,
+        e.zone_name,
+        e.zone_detail,
+        e.started_at,
+        e.ended_at,
+        e.duration_ms,
+        e.total_damage,
+        e.player_damage,
+        e.pet_damage,
+        e.dps,
+        e.best_hit,
+        e.mob_kill_count,
+        e.end_reason,
+        e.outcome,
+        nm.title AS named_title,
+        nm.wiki_url AS wiki_url
+      FROM encounters e
+      LEFT JOIN named_mobs nm ON nm.id = e.primary_named_mob_id
+      ORDER BY e.started_at DESC, e.id DESC
+      LIMIT ?
+    `)
+    .all(safeLimit)
+
+  return rows.map((row: unknown) => {
+    const value = row as Record<string, unknown>
+
+    return {
+      id: Number(value.id),
+      sessionId: Number(value.session_id),
+      sourceKey: String(value.source_key ?? ''),
+      encounterTitle: String(value.encounter_title),
+      primaryNpcName: String(value.primary_npc_name ?? value.encounter_title),
+      zoneName: value.zone_name ? String(value.zone_name) : undefined,
+      zoneDetail: value.zone_detail ? String(value.zone_detail) : undefined,
+      startedAt: String(value.started_at),
+      endedAt: String(value.ended_at),
+      durationMs: Number(value.duration_ms ?? 0),
+      totalDamage: Number(value.total_damage ?? 0),
+      playerDamage: Number(value.player_damage ?? 0),
+      petDamage: Number(value.pet_damage ?? 0),
+      dps: Number(value.dps ?? 0),
+      bestHit: Number(value.best_hit ?? 0),
+      mobKillCount: Number(value.mob_kill_count ?? 0),
+      endReason: String(value.end_reason ?? 'timeout'),
+      outcome: value.outcome === 'victory' ? 'victory' : 'failed',
+      actions: [],
+      mobs: [],
+      abilities: [],
+      attemptNumber: 1,
+      namedMobId: value.primary_named_mob_id
+        ? Number(value.primary_named_mob_id)
+        : null,
+      namedTitle: value.named_title ? String(value.named_title) : null,
+      wikiUrl: value.wiki_url ? String(value.wiki_url) : null
+    } as EncounterRecord
+  })
+}
+
+export function getEncounterById(id: number): EncounterRecord | null {
+  if (!database) throw new Error('PEQL database is not initialized.')
+
+  const rows = listEncounterDetailsByWhere('e.id = ?', [id])
+  return rows[0] ?? null
+}
+
+export function getEncounterBySourceKey(
+  sourceKey: string
+): EncounterRecord | null {
+  if (!database) throw new Error('PEQL database is not initialized.')
+  if (!sourceKey) return null
+
+  const rows = listEncounterDetailsByWhere('e.source_key = ?', [sourceKey])
+  return rows[0] ?? null
+}
+
+function listEncounterDetailsByWhere(
+  whereSql: string,
+  parameters: unknown[]
+): EncounterRecord[] {
+  if (!database) throw new Error('PEQL database is not initialized.')
+
+  const rows = database
+    .prepare(`
+      SELECT
+        e.*,
+        nm.title AS named_title,
+        nm.wiki_url AS wiki_url,
+        1 AS attempt_number
+      FROM encounters e
+      LEFT JOIN named_mobs nm ON nm.id = e.primary_named_mob_id
+      WHERE ${whereSql}
+      ORDER BY e.started_at DESC, e.id DESC
+      LIMIT 1
+    `)
+    .all(...parameters)
+
+  return rows.map((row: unknown) => {
+    const value = row as Record<string, unknown>
+
+    let actions = []
+    let mobs = []
+    let abilities = []
+
+    try { actions = JSON.parse(String(value.actions_json ?? '[]')) } catch {}
+    try { mobs = JSON.parse(String(value.mob_breakdown_json ?? '[]')) } catch {}
+    try { abilities = JSON.parse(String(value.ability_breakdown_json ?? '[]')) } catch {}
+
+    return {
+      id: Number(value.id),
+      sessionId: Number(value.session_id),
+      sourceKey: String(value.source_key ?? ''),
+      encounterTitle: String(value.encounter_title),
+      primaryNpcName: String(value.primary_npc_name ?? value.encounter_title),
+      zoneName: value.zone_name ? String(value.zone_name) : undefined,
+      zoneDetail: value.zone_detail ? String(value.zone_detail) : undefined,
+      startedAt: String(value.started_at),
+      endedAt: String(value.ended_at),
+      durationMs: Number(value.duration_ms ?? 0),
+      totalDamage: Number(value.total_damage ?? 0),
+      playerDamage: Number(value.player_damage ?? 0),
+      petDamage: Number(value.pet_damage ?? 0),
+      dps: Number(value.dps ?? 0),
+      bestHit: Number(value.best_hit ?? 0),
+      mobKillCount: Number(value.mob_kill_count ?? 0),
+      endReason: String(value.end_reason ?? 'timeout'),
+      outcome: value.outcome === 'victory' ? 'victory' : 'failed',
+      actions,
+      mobs,
+      abilities,
+      attemptNumber: Number(value.attempt_number ?? 1),
+      namedMobId: value.primary_named_mob_id
+        ? Number(value.primary_named_mob_id)
+        : null,
+      namedTitle: value.named_title ? String(value.named_title) : null,
+      wikiUrl: value.wiki_url ? String(value.wiki_url) : null
+    } as EncounterRecord
+  })
+}
+
 export function listEncounters(limit = 500): EncounterRecord[] {
   if (!database) throw new Error('PEQL database is not initialized.')
 

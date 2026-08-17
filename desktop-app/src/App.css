@@ -1103,3 +1103,62 @@ body {
 
 /* COMBAT ANALYTICS V1 */
 .fight-details-analytics{margin-top:18px;border-top:1px solid #29445a;padding-top:16px}.fight-details-heading,.analytics-heading{display:flex;justify-content:space-between;align-items:center;gap:16px}.fight-details-heading>div,.fight-ability-main,.fight-ability-numbers,.analytics-stat,.analytics-target-row>div{display:flex;flex-direction:column;gap:3px}.fight-details-heading span,.fight-ability-main span,.fight-ability-numbers span,.analytics-stat span,.analytics-target-row span{color:#8eacc2;font-size:.82rem}.fight-ability-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px}.fight-ability-row{display:flex;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid #203a50;border-radius:9px;background:#0c1c2b}.fight-ability-numbers{text-align:right}.analytics-page{width:min(1180px,calc(100% - 48px));margin:24px auto 40px}.analytics-heading{margin-bottom:18px}.analytics-heading h2{margin:3px 0}.analytics-heading p{margin:0;color:#9ec5df}.analytics-kicker{color:#57c8ff;font-size:.78rem;font-weight:700;letter-spacing:.14em}.analytics-version{border:1px solid #31516b;border-radius:999px;padding:7px 12px}.analytics-coverage,.analytics-card,.analytics-stat{border:1px solid #29445a;background:#0b1b29;border-radius:10px}.analytics-coverage{padding:10px 12px;margin-bottom:14px;color:#a9c6d9;font-size:.9rem}.analytics-summary-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:14px}.analytics-stat{padding:12px}.analytics-stat strong{font-size:1.12rem}.analytics-columns{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}.analytics-card{padding:16px}.analytics-source-list,.analytics-target-list{display:flex;flex-direction:column;gap:7px;margin-top:14px}.analytics-source-row,.analytics-target-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px 10px;border-radius:8px;background:#0d2233}.analytics-table-wrap{overflow-x:auto;margin-top:14px}.analytics-table{width:100%;border-collapse:collapse}.analytics-table th,.analytics-table td{padding:9px 10px;border-bottom:1px solid #20394d;text-align:right;white-space:nowrap}.analytics-table th:first-child,.analytics-table td:first-child,.analytics-table th:nth-child(2),.analytics-table td:nth-child(2){text-align:left}.analytics-table th{color:#74cfff;font-size:.78rem;text-transform:uppercase}.analytics-pet-tag{margin-left:7px;padding:2px 5px;border:1px solid #40607a;border-radius:5px;color:#9ec5df;font-size:.66rem}@media(max-width:900px){.analytics-summary-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.analytics-columns,.fight-ability-list{grid-template-columns:1fr}}@media(max-width:620px){.analytics-page{width:calc(100% - 24px)}.analytics-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.fight-ability-row{flex-direction:column}.fight-ability-numbers{text-align:left}}
+
+
+/* PEQL 1.0 responsive loading state */
+.peql-loading {
+  margin: 12px 0 16px;
+  padding: 12px 14px;
+  border: 1px solid #294b64;
+  border-radius: 12px;
+  background: rgba(5, 20, 31, 0.72);
+}
+
+.peql-loading-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+
+.peql-loading-header span,
+.peql-loading small {
+  opacity: 0.72;
+}
+
+.peql-loading-track {
+  position: relative;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.09);
+  margin-bottom: 7px;
+}
+
+.peql-loading-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 34%;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0.78;
+  animation: peql-loading-slide 1.05s ease-in-out infinite;
+}
+
+@keyframes peql-loading-slide {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(400%); }
+}
+
+
+/* PEQL Journal exit/navigation optimization */
+.journal-day-group {
+  content-visibility: auto;
+  contain-intrinsic-size: 1px 900px;
+}
+
+.journal-entry {
+  contain: layout paint;
+}
+

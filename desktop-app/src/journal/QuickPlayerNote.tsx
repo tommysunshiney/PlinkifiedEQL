@@ -1,24 +1,69 @@
-import { memo, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import type { PlayerNoteRecord } from '../types/database'
+
+export type NoteEncounterOption = {
+  id: string
+  target: string
+  label: string
+}
 
 type QuickPlayerNoteProps = {
   selectedLog: string
   zoneName: string | null
   activeEncounterId?: string
   activeEncounterTarget?: string
+  recentEncounters?: NoteEncounterOption[]
   onSaved: (note: PlayerNoteRecord) => void
 }
+
+type NoteContext = 'auto' | 'session' | 'general' | string
 
 function QuickPlayerNoteComponent({
   selectedLog,
   zoneName,
   activeEncounterId,
   activeEncounterTarget,
+  recentEncounters = [],
   onSaved
 }: QuickPlayerNoteProps) {
   const [noteText, setNoteText] = useState('')
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState('')
+  const [noteContext, setNoteContext] = useState<NoteContext>('auto')
+
+  const selectedEncounter = useMemo(() => {
+    if (noteContext === 'auto') {
+      if (!activeEncounterId) return null
+      return {
+        id: activeEncounterId,
+        target: activeEncounterTarget ?? 'active encounter',
+        label: 'Current Fight'
+      }
+    }
+
+    if (noteContext === 'session' || noteContext === 'general') return null
+    return recentEncounters.find((encounter) => encounter.id === noteContext) ?? null
+  }, [
+    noteContext,
+    activeEncounterId,
+    activeEncounterTarget,
+    recentEncounters
+  ])
+
+  const contextLabel = useMemo(() => {
+    if (noteContext === 'auto') {
+      return activeEncounterTarget
+        ? `Current Fight · ${activeEncounterTarget}`
+        : 'Session · no active fight'
+    }
+    if (noteContext === 'session') {
+      return zoneName ? `Session · ${zoneName}` : 'Session'
+    }
+    if (noteContext === 'general') return 'General / Other'
+    return selectedEncounter
+      ? `Recent Fight · ${selectedEncounter.target}`
+      : 'Recent Fight'
+  }, [noteContext, activeEncounterTarget, selectedEncounter, zoneName])
 
   async function saveNote() {
     const trimmed = noteText.trim()
@@ -27,20 +72,25 @@ function QuickPlayerNoteComponent({
     setSaving(true)
     setStatus('')
 
+    const encounterSourceKey = selectedEncounter?.id
+    const includeZone = noteContext !== 'general'
+
     try {
       const saved = await window.electronAPI.savePlayerNote({
         logFilePath: selectedLog,
         createdAt: new Date().toISOString(),
-        zoneName: zoneName ?? undefined,
+        zoneName: includeZone ? zoneName ?? undefined : undefined,
         noteText: trimmed,
-        encounterSourceKey: activeEncounterId
+        encounterSourceKey
       })
 
       setNoteText('')
       setStatus(
-        activeEncounterTarget
-          ? `Saved to active encounter: ${activeEncounterTarget}`
-          : 'Saved as session note'
+        selectedEncounter
+          ? `Saved to: ${selectedEncounter.target}`
+          : noteContext === 'general'
+            ? 'Saved as general note'
+            : 'Saved as session note'
       )
       onSaved(saved)
     } catch (error) {
@@ -60,7 +110,48 @@ function QuickPlayerNoteComponent({
         marginBottom: '14px'
       }}
     >
-      <strong>📝 Quick Player Note</strong>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '10px',
+          flexWrap: 'wrap'
+        }}
+      >
+        <strong>📝 Quick Player Note</strong>
+        <select
+          value={noteContext}
+          onChange={(event) => {
+            setNoteContext(event.target.value)
+            setStatus('')
+          }}
+          disabled={!selectedLog || saving}
+          title="Attach this note to the current fight, a recent fight, or the session"
+          style={{
+            minWidth: '210px',
+            padding: '7px 9px',
+            borderRadius: '8px',
+            border: '1px solid #365a73',
+            background: '#081a28',
+            color: 'inherit'
+          }}
+        >
+          <option value="auto">
+            {activeEncounterTarget
+              ? `Current Fight · ${activeEncounterTarget}`
+              : 'Auto · Session (no active fight)'}
+          </option>
+          {recentEncounters.map((encounter) => (
+            <option key={encounter.id} value={encounter.id}>
+              {encounter.label} · {encounter.target}
+            </option>
+          ))}
+          <option value="session">Session / Current Zone</option>
+          <option value="general">General / Other</option>
+        </select>
+      </div>
+
       <div
         style={{
           display: 'grid',
@@ -97,6 +188,7 @@ function QuickPlayerNoteComponent({
           {saving ? 'Saving…' : 'Save Note'}
         </button>
       </div>
+
       <div
         style={{
           marginTop: '5px',
@@ -104,10 +196,7 @@ function QuickPlayerNoteComponent({
           opacity: 0.8
         }}
       >
-        {activeEncounterTarget
-          ? `Active encounter: ${activeEncounterTarget}`
-          : 'No active encounter — note will be session-level.'}
-        {zoneName ? ` · ${zoneName}` : ''}
+        Attach to: {contextLabel}
         {status ? ` · ${status}` : ''}
       </div>
     </div>

@@ -31,6 +31,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ): Promise<PlayerNoteRecord[]> =>
     ipcRenderer.invoke('player-notes:list', limit),
 
+  exportPlayerNotes: (): Promise<{
+    canceled: boolean
+    filePath?: string
+    count: number
+  }> => ipcRenderer.invoke('player-notes:export'),
+
   saveEncounters: (
     logFilePath: string,
     encounters: EncounterInput[],
@@ -40,6 +46,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   listEncounters: (limit?: number) =>
     ipcRenderer.invoke('encounters:list', limit),
+
+  listEncounterSummaries: (limit?: number) =>
+    ipcRenderer.invoke('encounters:listSummaries', limit),
+
+  listCombatStatsSummaries: (limit?: number) =>
+    ipcRenderer.invoke('encounters:listCombatStatsSummaries', limit),
+
+  getEncounterById: (id: number) =>
+    ipcRenderer.invoke('encounters:getById', id),
+
+  getEncounterBySourceKey: (sourceKey: string) =>
+    ipcRenderer.invoke('encounters:getBySourceKey', sourceKey),
 
   openExternal: (url: string): Promise<void> =>
     ipcRenderer.invoke('external:open', url),
@@ -60,6 +78,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('log:newLines')
     ipcRenderer.on('log:newLines', (_event, lines: string[]) => {
       callback(lines)
+    })
+  },
+
+  onEqlInputActivity: (callback: (timestamp: number) => void): void => {
+    ipcRenderer.removeAllListeners('eql:input-activity')
+    ipcRenderer.on('eql:input-activity', (_event, timestamp: number) => {
+      callback(timestamp)
     })
   },
 

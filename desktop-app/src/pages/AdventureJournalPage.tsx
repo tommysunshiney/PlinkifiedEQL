@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
+import PeqlLoading from '../components/PeqlLoading'
+import { NotesBrowser } from '../journal/NotesBrowser'
 import { useSession } from '../session/SessionContext'
 import type {
   BossRecord,
@@ -14,6 +16,8 @@ type JournalFilter =
   | 'named'
   | 'loot'
   | 'incidents'
+
+const JOURNAL_RENDER_STEP = 100
 
 const filters: Array<{ id: JournalFilter; label: string }> = [
   { id: 'all', label: 'All Activity' },
@@ -152,42 +156,6 @@ function humanizeTimelineText(value: string): string {
   return `${time} ${text}`
 }
 
-function findEncounterForEntry(
-  entry: JournalRecord,
-  encounters: EncounterRecord[]
-): EncounterRecord | null {
-  if (entry.entryType !== 'fight' && entry.entryType !== 'named') {
-    return null
-  }
-
-  const target = normalizeNpcName(entry.title)
-  const occurredAt = Date.parse(entry.occurredAt)
-
-  const candidates = encounters.filter((encounter) => {
-    if (encounter.outcome !== 'victory') return false
-
-    const primary = normalizeNpcName(encounter.primaryNpcName)
-    const title = normalizeNpcName(encounter.encounterTitle)
-    return primary === target || title === target || title.startsWith(`${target} +`)
-  })
-
-  if (candidates.length === 0 || Number.isNaN(occurredAt)) return null
-
-  return candidates
-    .map((encounter) => ({
-      encounter,
-      distance: Math.abs(Date.parse(encounter.endedAt) - occurredAt)
-    }))
-    .filter((candidate) => candidate.distance <= 30_000)
-    .sort((a, b) => {
-      if (a.distance !== b.distance) return a.distance - b.distance
-      if (a.encounter.totalDamage !== b.encounter.totalDamage) {
-        return b.encounter.totalDamage - a.encounter.totalDamage
-      }
-      return b.encounter.durationMs - a.encounter.durationMs
-    })[0]?.encounter ?? null
-}
-
 export default function AdventureJournalPage() {
   const [playerNotes, setPlayerNotes] = useState<PlayerNoteRecord[]>([])
 
@@ -197,6 +165,10 @@ export default function AdventureJournalPage() {
   const [encounters, setEncounters] = useState<EncounterRecord[]>([])
   const [selectedEncounter, setSelectedEncounter] = useState<EncounterRecord | null>(null)
   const [journalMessage, setJournalMessage] = useState('')
+  const [journalLoading, setJournalLoading] = useState(true)
+  const [journalLoadingStage, setJournalLoadingStage] =
+    useState('Opening saved history…')
+  const [renderLimit, setRenderLimit] = useState(JOURNAL_RENDER_STEP)
   const [bossQuery, setBossQuery] = useState('')
   const [bossResults, setBossResults] = useState<BossRecord[]>([])
   const [bossSearchMessage, setBossSearchMessage] = useState('')
@@ -210,22 +182,33 @@ export default function AdventureJournalPage() {
 
   async function refreshJournal() {
     try {
-      const [status, savedEntries, savedEncounters, savedPlayerNotes] =
-        await Promise.all([
-          window.electronAPI.getDatabaseStatus(),
-          window.electronAPI.listJournalEntries(5000),
-          window.electronAPI.listEncounters(2000),
-          window.electronAPI.listPlayerNotes(100)
-        ])
+      // Stage fast/light data first so the Journal becomes useful immediately.
+      // Do not make notes/history wait for heavy encounter hydration.
+      setJournalLoading(true)
+      setJournalLoadingStage('Loading saved notes…')
+      const savedPlayerNotes =
+        await window.electronAPI.listPlayerNotes(1000)
+      setPlayerNotes(savedPlayerNotes)
 
+      setJournalLoadingStage('Loading adventure history…')
+      const [status, savedEntries] = await Promise.all([
+        window.electronAPI.getDatabaseStatus(),
+        window.electronAPI.listJournalEntries(5000)
+      ])
       setDatabaseStatus(status)
       setEntries(savedEntries)
-      setEncounters(savedEncounters)
-      setPlayerNotes(savedPlayerNotes)
       setJournalMessage('')
+
+      // Encounter summaries intentionally omit large JSON payloads.
+      setJournalLoadingStage('Matching recent encounters…')
+      const savedEncounters =
+        await window.electronAPI.listEncounterSummaries(2000)
+      setEncounters(savedEncounters)
+      setJournalLoading(false)
     } catch (error) {
       console.error('Unable to load persistent Adventure Journal:', error)
       setJournalMessage('Unable to load saved Adventure Journal history.')
+      setJournalLoading(false)
     }
   }
 
@@ -270,10 +253,15 @@ export default function AdventureJournalPage() {
     return entries.filter((entry) => entry.entryType === 'incident')
   }, [activeFilter, entries])
 
+  const renderedEntries = useMemo(
+    () => visibleEntries.slice(0, renderLimit),
+    [visibleEntries, renderLimit]
+  )
+
   const groupedVisibleEntries = useMemo(() => {
     const groups: Array<{ label: string; entries: JournalRecord[] }> = []
 
-    for (const entry of visibleEntries) {
+    for (const entry of renderedEntries) {
       const label = getDayLabel(entry.occurredAt)
       const current = groups[groups.length - 1]
 
@@ -285,19 +273,105 @@ export default function AdventureJournalPage() {
     }
 
     return groups
-  }, [visibleEntries])
+  }, [renderedEntries])
 
   const encounterForEntryId = useMemo(() => {
-    const matches = new Map<number, EncounterRecord>()
-
-    for (const entry of entries) {
-      if (entry.entryType !== 'fight' && entry.entryType !== 'named') continue
-      const encounter = encounterForEntryId.get(entry.id) ?? null
-      if (encounter) matches.set(entry.id, encounter)
+    type IndexedEncounter = {
+      encounter: EncounterRecord
+      primary: string
+      title: string
+      endedAt: number
     }
 
+    const exact = new Map<string, IndexedEncounter[]>()
+    const indexed: IndexedEncounter[] = []
+
+    function addExact(key: string, value: IndexedEncounter) {
+      if (!key) return
+      const existing = exact.get(key)
+      if (existing) {
+        existing.push(value)
+      } else {
+        exact.set(key, [value])
+      }
+    }
+
+    for (const encounter of encounters) {
+      if (encounter.outcome !== 'victory') continue
+
+      const value: IndexedEncounter = {
+        encounter,
+        primary: normalizeNpcName(encounter.primaryNpcName),
+        title: normalizeNpcName(encounter.encounterTitle),
+        endedAt: Date.parse(encounter.endedAt)
+      }
+
+      indexed.push(value)
+      addExact(value.primary, value)
+      addExact(value.title, value)
+    }
+
+    const matches = new Map<number, EncounterRecord>()
+
+    // Only rows that can actually be displayed/clicked need a match right now.
+    // "Show more history" naturally expands this set in bounded chunks.
+    for (const entry of renderedEntries) {
+      if (entry.entryType !== 'fight' && entry.entryType !== 'named') {
+        continue
+      }
+
+      const target = normalizeNpcName(entry.title)
+      const occurredAt = Date.parse(entry.occurredAt)
+      if (!target || Number.isNaN(occurredAt)) continue
+
+      const candidates = new Map<number, IndexedEncounter>()
+
+      for (const candidate of exact.get(target) ?? []) {
+        candidates.set(candidate.encounter.id, candidate)
+      }
+
+      // Multi-add encounter titles are stored as "target + N adds".
+      // This fallback is only used when exact lookup did not already give us
+      // candidates, and it uses pre-normalized strings.
+      if (candidates.size === 0) {
+        for (const candidate of indexed) {
+          if (candidate.title.startsWith(`${target} +`)) {
+            candidates.set(candidate.encounter.id, candidate)
+          }
+        }
+      }
+
+      let best: IndexedEncounter | null = null
+      let bestDistance = Number.POSITIVE_INFINITY
+
+      for (const candidate of candidates.values()) {
+        if (Number.isNaN(candidate.endedAt)) continue
+
+        const distance = Math.abs(candidate.endedAt - occurredAt)
+        if (distance > 30_000) continue
+
+        if (
+          best === null ||
+          distance < bestDistance ||
+          (
+            distance === bestDistance &&
+            candidate.encounter.totalDamage > best.encounter.totalDamage
+          ) ||
+          (
+            distance === bestDistance &&
+            candidate.encounter.totalDamage === best.encounter.totalDamage &&
+            candidate.encounter.durationMs > best.encounter.durationMs
+          )
+        ) {
+          best = candidate
+          bestDistance = distance
+        }
+      }
+
+      if (best) matches.set(entry.id, best.encounter)
+    }
     return matches
-  }, [entries, encounters])
+  }, [renderedEntries, encounters])
 
   const lootCount = entries.filter(
     (entry) => entry.entryType === 'loot'
@@ -314,13 +388,51 @@ export default function AdventureJournalPage() {
     (entry) => entry.entryType === 'instance'
   ).length
 
-  function handleEntryClick(entry: JournalRecord) {
-    const encounter = findEncounterForEntry(entry, encounters)
-    if (!encounter) return
+  async function handleEntryClick(entry: JournalRecord) {
+    const summary = encounterForEntryId.get(entry.id) ?? null
+    if (!summary) return
 
-    setSelectedEncounter((current) =>
-      current?.id === encounter.id ? null : encounter
-    )
+    if (selectedEncounter?.id === summary.id) {
+      setSelectedEncounter(null)
+      return
+    }
+
+    try {
+      const detailed =
+        await window.electronAPI.getEncounterById(summary.id)
+      setSelectedEncounter(detailed ?? summary)
+    } catch (error) {
+      console.error('Unable to load encounter details:', error)
+      setSelectedEncounter(summary)
+    }
+  }
+
+  async function handleNoteEncounter(note: PlayerNoteRecord) {
+    if (!note.encounterSourceKey) return
+
+    try {
+      const encounter =
+        await window.electronAPI.getEncounterBySourceKey(
+          note.encounterSourceKey
+        )
+
+      if (!encounter) return
+
+      setActiveFilter('all')
+      setSelectedEncounter(encounter)
+
+      window.setTimeout(() => {
+        const row = document.querySelector(
+          `[data-encounter-id="${encounter.id}"]`
+        )
+        row?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center'
+        })
+      }, 50)
+    } catch (error) {
+      console.error('Unable to open note-linked encounter:', error)
+    }
   }
 
   return (
@@ -368,12 +480,28 @@ export default function AdventureJournalPage() {
           <button
             className={`journal-filter ${activeFilter === filter.id ? 'active' : ''}`}
             key={filter.id}
-            onClick={() => setActiveFilter(filter.id)}
+            onClick={() => {
+              setActiveFilter(filter.id)
+              setRenderLimit(JOURNAL_RENDER_STEP)
+            }}
           >
             {filter.label}
           </button>
         ))}
       </nav>
+
+      <NotesBrowser
+        journalRevision={journalRevision}
+        encounterRevision={encounterRevision}
+      />
+
+      {journalLoading && (
+        <PeqlLoading
+          title="Loading Adventure Journal"
+          stage={journalLoadingStage}
+          detail="Saved history is loading independently of the live EQL log."
+        />
+      )}
 
       <section className="journal-grid">
         <article className="journal-card">
@@ -413,14 +541,15 @@ export default function AdventureJournalPage() {
                       <div key={entry.id}>
                         <div
                           className={`journal-entry entry-${entry.entryType}`}
-                          onClick={() => handleEntryClick(entry)}
+                          data-encounter-id={encounter?.id}
+                          onClick={() => void handleEntryClick(entry)}
                           role={clickable ? 'button' : undefined}
                           tabIndex={clickable ? 0 : undefined}
                           onKeyDown={(event) => {
                             if (!clickable) return
                             if (event.key === 'Enter' || event.key === ' ') {
                               event.preventDefault()
-                              handleEntryClick(entry)
+                              void handleEntryClick(entry)
                             }
                           }}
                           style={{
@@ -636,6 +765,31 @@ export default function AdventureJournalPage() {
               ))}
             </div>
           ) : null}
+
+          {!journalMessage && visibleEntries.length > renderLimit && (
+            <div style={{ padding: '12px 0', textAlign: 'center' }}>
+              <button
+                type="button"
+                onClick={() =>
+                  setRenderLimit((current) =>
+                    Math.min(
+                      visibleEntries.length,
+                      current + JOURNAL_RENDER_STEP
+                    )
+                  )
+                }
+              >
+                Show more history · {Math.min(
+                  JOURNAL_RENDER_STEP,
+                  visibleEntries.length - renderLimit
+                )} more
+              </button>
+              <div style={{ marginTop: '5px', opacity: 0.65, fontSize: '0.82em' }}>
+                Showing {Math.min(renderLimit, visibleEntries.length).toLocaleString()}
+                {' '}of {visibleEntries.length.toLocaleString()} matching entries
+              </div>
+            </div>
+          )}
         </article>
 
         <aside className="journal-card">
@@ -653,12 +807,28 @@ export default function AdventureJournalPage() {
 
           <div className="boss-catalog-tool">
             <div style={{ marginTop: '18px', marginBottom: '18px' }}>
-              <h4>📝 Recent Player Notes</h4>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '8px'
+                }}
+              >
+                <h4 style={{ margin: 0 }}>📝 Notes Center</h4>
+                <small style={{ opacity: 0.7 }}>
+                  {playerNotes.length} loaded
+                </small>
+              </div>
+              <p style={{ marginTop: '6px', opacity: 0.78 }}>
+                Your breadcrumbs. Encounter-linked notes can jump straight
+                back to the saved fight.
+              </p>
               <div
                 style={{
                   display: 'grid',
-                  gap: '7px',
-                  maxHeight: '190px',
+                  gap: '9px',
+                  maxHeight: '320px',
                   overflowY: 'auto'
                 }}
               >
@@ -667,31 +837,65 @@ export default function AdventureJournalPage() {
                     No player notes saved yet.
                   </span>
                 ) : (
-                  playerNotes.slice(0, 12).map((note) => (
-                    <div
-                      key={note.id}
-                      style={{
-                        paddingBottom: '7px',
-                        borderBottom: '1px solid #18364a'
-                      }}
-                    >
-                      <strong>
-                        {new Date(note.createdAt).toLocaleTimeString([], {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                          second: '2-digit'
-                        })}
-                      </strong>
-                      {note.zoneName ? ` · ${note.zoneName}` : ''}
-                      {note.encounterTitle
-                        ? ` · ${note.encounterTitle}`
-                        : note.encounterSourceKey
-                          ? ' · active encounter'
-                          : ' · session note'}
-                      <br />
-                      {note.noteText}
-                    </div>
-                  ))
+                  playerNotes.slice(0, 30).map((note) => {
+                    const linkedEncounter = note.encounterSourceKey
+                      ? encounters.find(
+                          (encounter) =>
+                            encounter.sourceKey === note.encounterSourceKey
+                        ) ?? null
+                      : null
+
+                    return (
+                      <div
+                        key={note.id}
+                        style={{
+                          padding: '8px 0',
+                          borderBottom: '1px solid #18364a'
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            gap: '8px',
+                            alignItems: 'start'
+                          }}
+                        >
+                          <span>
+                            <strong>
+                              {new Date(note.createdAt).toLocaleString([], {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}
+                            </strong>
+                            {note.zoneName ? ` · ${note.zoneName}` : ''}
+                            <br />
+                            <small style={{ opacity: 0.78 }}>
+                              {note.encounterTitle
+                                ? note.encounterTitle
+                                : note.encounterSourceKey
+                                  ? 'Encounter-linked note'
+                                  : 'Session / general note'}
+                            </small>
+                          </span>
+
+                          {linkedEncounter && (
+                            <button
+                              type="button"
+                              onClick={() => handleNoteEncounter(note)}
+                              title="Open this note's saved encounter in Adventure History"
+                              style={{ whiteSpace: 'nowrap' }}
+                            >
+                              Open Fight ›
+                            </button>
+                          )}
+                        </div>
+                        <div style={{ marginTop: '5px' }}>{note.noteText}</div>
+                      </div>
+                    )
+                  })
                 )}
               </div>
             </div>
