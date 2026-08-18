@@ -303,7 +303,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
       // Connected means the live watcher is attached. Historical warmup no
       // longer blocks the Connected state.
-      await window.electronAPI.startLogWatch(filePath)
+      const watchResult =
+        await window.electronAPI.startLogWatch(filePath)
+
+      if (!watchResult.success) {
+        setIsConnected(false)
+        setConnectionError(
+          'Saved log file is no longer available. Please select an EQL log file.'
+        )
+        return
+      }
+
       setIsConnected(true)
 
       const recentSessionLines = getSessionLines(recentLines)

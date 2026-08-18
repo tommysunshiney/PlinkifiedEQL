@@ -15,7 +15,7 @@ export default function Header() {
       </div>
 
       <span className="version">
-        v0.8a
+        v1.0.0
       </span>
 
     </header>

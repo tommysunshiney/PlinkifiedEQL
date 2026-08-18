@@ -1,7 +1,7 @@
 {
-  "name": "desktop-app",
+  "name": "plinkified-eql",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -41,5 +41,48 @@
     "better-sqlite3@11.10.0": true,
     "electron@30.5.1": true,
     "esbuild@0.21.5": true
+  },
+  "productName": "Plinkified EQL",
+  "description": "Desktop companion and combat log analyzer for EverQuest Legends.",
+  "author": "Tommy Sunshine",
+  "build": {
+    "appId": "com.plinkified.eql",
+    "productName": "Plinkified EQL",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Plinkified EQL",
+      "artifactName": "Plinkified-EQL-Setup-${version}.${ext}"
+    },
+    "extraResources": [
+      {
+        "from": "src/assets",
+        "to": "assets",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ]
   }
 }

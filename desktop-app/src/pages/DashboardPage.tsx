@@ -4,7 +4,6 @@ import {
   useRef,
   useState
 } from 'react'
-import type { ChangeEvent } from 'react'
 import '../App.css'
 import { EventType, parseLine } from '../parser'
 import { useSession } from '../session/SessionContext'
@@ -73,7 +72,6 @@ export default function DashboardPage() {
   const alarmRetryTimerRef = useRef<number | null>(null)
   const alarmTestTimerRef = useRef<number | null>(null)
   const fartMarkerWrittenRef = useRef(false)
-  const alarmSoundInputRef = useRef<HTMLInputElement>(null)
 
   const visibleParsedEvents = useMemo(
     () =>
@@ -107,24 +105,26 @@ export default function DashboardPage() {
     }
   }, [])
 
-  function handleSelectAlarmSound(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
-    if (!file) return
+  async function handleSelectAlarmSound() {
+    try {
+      const selected = await window.electronAPI.selectAlarmSound()
+      if (!selected) return
 
-    const reader = new FileReader()
-    reader.addEventListener('load', () => {
-      if (typeof reader.result !== 'string') return
-      setAlarmSoundUrl(reader.result)
-      setAlarmSoundName(file.name)
+      setAlarmSoundUrl(selected.dataUrl)
+      setAlarmSoundName(selected.name)
+
       try {
-        localStorage.setItem(ALARM_SOUND_DATA_KEY, reader.result)
-        localStorage.setItem(ALARM_SOUND_NAME_KEY, file.name)
+        localStorage.setItem(ALARM_SOUND_DATA_KEY, selected.dataUrl)
+        localStorage.setItem(ALARM_SOUND_NAME_KEY, selected.name)
       } catch (error) {
-        console.warn('Alarm sound selected for this run but could not be saved:', error)
+        console.warn(
+          'Alarm sound selected for this run but could not be saved:',
+          error
+        )
       }
-    })
-    reader.readAsDataURL(file)
-    event.target.value = ''
+    } catch (error) {
+      console.error('Unable to select alarm sound:', error)
+    }
   }
 
   useEffect(() => {
@@ -512,18 +512,9 @@ export default function DashboardPage() {
           >
             {isSelectingLog ? 'Selecting Log...' : 'Select EQL Log File'}
           </button>
-
-          <input
-            ref={alarmSoundInputRef}
-            className="visually-hidden"
-            type="file"
-            accept="audio/*,.mp3,.wav,.ogg,.m4a"
-            onChange={handleSelectAlarmSound}
-          />
-
-          <button
+<button
             className="select-button"
-            onClick={() => alarmSoundInputRef.current?.click()}
+            onClick={() => void handleSelectAlarmSound()}
             title={`Current alarm: ${alarmSoundName}`}
           >
             Alarm Sound

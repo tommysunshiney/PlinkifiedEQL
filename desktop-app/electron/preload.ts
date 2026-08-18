@@ -65,10 +65,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectLogFile: (): Promise<string | null> =>
     ipcRenderer.invoke('dialog:openLogFile'),
 
+  selectAlarmSound: (): Promise<{
+    name: string
+    dataUrl: string
+  } | null> =>
+    ipcRenderer.invoke('dialog:openAlarmSound'),
+
   readLogFile: (filePath: string): Promise<string[]> =>
     ipcRenderer.invoke('log:read', filePath),
 
-  startLogWatch: (filePath: string): Promise<void> =>
+  startLogWatch: (filePath: string): Promise<{
+    success: boolean
+    reason?: 'missing'
+  }> =>
     ipcRenderer.invoke('log:startWatch', filePath),
 
   stopLogWatch: (): Promise<void> =>

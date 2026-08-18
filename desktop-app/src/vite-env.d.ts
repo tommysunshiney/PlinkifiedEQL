@@ -50,8 +50,15 @@ declare global {
       ) => Promise<EncounterRecord | null>
       openExternal: (url: string) => Promise<void>
       selectLogFile: () => Promise<string | null>
+      selectAlarmSound: () => Promise<{
+        name: string
+        dataUrl: string
+      } | null>
       readLogFile: (filePath: string) => Promise<string[]>
-      startLogWatch: (filePath: string) => Promise<void>
+      startLogWatch: (filePath: string) => Promise<{
+        success: boolean
+        reason?: 'missing'
+      }>
       stopLogWatch: () => Promise<void>
       onLogLines: (callback: (lines: string[]) => void) => void
       onEqlInputActivity: (callback: (timestamp: number) => void) => void

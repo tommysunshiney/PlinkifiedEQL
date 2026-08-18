@@ -197,6 +197,62 @@ ipcMain.handle('external:open', async (_, url: string) => {
   await shell.openExternal(parsed.toString())
 })
 
+function bundledSoundDirectory(): string {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'assets')
+    : path.join(process.env.APP_ROOT, 'src', 'assets')
+}
+
+function audioMimeType(filePath: string): string {
+  switch (path.extname(filePath).toLowerCase()) {
+    case '.wav':
+      return 'audio/wav'
+    case '.ogg':
+      return 'audio/ogg'
+    case '.m4a':
+      return 'audio/mp4'
+    case '.aac':
+      return 'audio/aac'
+    case '.flac':
+      return 'audio/flac'
+    case '.mp3':
+    default:
+      return 'audio/mpeg'
+  }
+}
+
+ipcMain.handle('dialog:openAlarmSound', async () => {
+  const defaultPath = bundledSoundDirectory()
+
+	const options: Electron.OpenDialogOptions = {
+    title: 'Select PEQL Alarm Sound',
+    defaultPath,
+    properties: ['openFile'],
+    filters: [
+      {
+        name: 'Audio Files',
+        extensions: ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac']
+      },
+      { name: 'All Files', extensions: ['*'] }
+    ]
+  }
+
+  const result = win
+    ? await dialog.showOpenDialog(win, options)
+    : await dialog.showOpenDialog(options)
+
+  if (result.canceled || result.filePaths.length === 0) return null
+
+  const filePath = result.filePaths[0]
+  const contents = await fs.readFile(filePath)
+
+  return {
+    name: path.basename(filePath),
+    dataUrl:
+      `data:${audioMimeType(filePath)};base64,${contents.toString('base64')}`
+  }
+})
+
 ipcMain.handle('dialog:openLogFile', async () => {
   if (logDialogOpen) return null
 
@@ -352,7 +408,27 @@ async function readRecentLogTail(filePath: string): Promise<string[]> {
 }
 
 ipcMain.handle('log:read', async (_, filePath: string) => {
-  return readRecentLogTail(filePath)
+  if (!filePath) return []
+
+  try {
+    return await readRecentLogTail(filePath)
+  } catch (error) {
+    const code =
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error
+        ? String((error as NodeJS.ErrnoException).code ?? '')
+        : ''
+
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      console.warn(
+        `Selected EQL log is no longer available: ${filePath}`
+      )
+      return []
+    }
+
+    throw error
+  }
 })
 
 ipcMain.handle('log:newSession', async (_, filePath: string) => {
@@ -520,7 +596,7 @@ function stopEqlInputMonitor() {
 
 function createWindow() {
   win = new BrowserWindow({
-    icon: path.join(process.env.VITE_PUBLIC, 'electron-vite.svg'),
+    icon: path.join(process.env.VITE_PUBLIC, 'assets', 'peql-window-icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
     },
@@ -565,7 +641,30 @@ let unfinishedLine = ''
 ipcMain.handle('log:startWatch', async (event, filePath: string) => {
   if (watchedLogPath) unwatchFile(watchedLogPath)
 
-  const stats = await fs.stat(filePath)
+  let stats
+  try {
+    stats = await fs.stat(filePath)
+  } catch (error) {
+    const code =
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error
+        ? String((error as NodeJS.ErrnoException).code ?? '')
+        : ''
+
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      watchedLogPath = null
+      watchedLogSize = 0
+      unfinishedLine = ''
+      return {
+        success: false,
+        reason: 'missing'
+      }
+    }
+
+    throw error
+  }
+
   watchedLogPath = filePath
   watchedLogSize = stats.size
   unfinishedLine = ''
@@ -604,6 +703,8 @@ ipcMain.handle('log:startWatch', async (event, filePath: string) => {
       console.error('Log watch error:', error)
     }
   })
+
+  return { success: true }
 })
 
 ipcMain.handle('log:stopWatch', () => {
